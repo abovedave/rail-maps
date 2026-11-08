@@ -18,7 +18,9 @@
 
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
+import { encode, simplify } from './geo.ts'
 import { LINES } from './lines.ts'
+import type { LatLon } from './osm.ts'
 
 /** Lines' width, and the space between them, in screen points at the zoom
  *  they're drawn for. */
@@ -41,27 +43,6 @@ const fromMercator = (x: number, y: number): [number, number] =>
   [(x / R) * (180 / Math.PI), (Math.atan(Math.exp(y / R)) * 360) / Math.PI - 90]
 const mercX = (lon: number) => (lon * Math.PI * R) / 180
 const mercY = (lat: number) => R * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))
-
-/** Douglas–Peucker on flat points, keeping both ends. */
-function simplify(p: [number, number][], tolerance: number) {
-  if (p.length <= 2) return p
-  const keep = new Uint8Array(p.length)
-  keep[0] = keep[p.length - 1] = 1
-  const stack: [number, number][] = [[0, p.length - 1]]
-  while (stack.length) {
-    const [s, e] = stack.pop()!
-    const [ax, ay] = p[s], [bx, by] = p[e]
-    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy
-    let worst = -1, index = -1
-    for (let i = s + 1; i < e; i++) {
-      const t = len2 ? Math.max(0, Math.min(1, ((p[i][0] - ax) * dx + (p[i][1] - ay) * dy) / len2)) : 0
-      const d = Math.hypot(p[i][0] - (ax + t * dx), p[i][1] - (ay + t * dy))
-      if (d > worst) { worst = d; index = i }
-    }
-    if (worst > tolerance) { keep[index] = 1; stack.push([s, index], [index, e]) }
-  }
-  return p.filter((_, i) => keep[i])
-}
 
 /** Joins pieces of one colour whose ends meet (within `tolerance`, either
  *  way round) into longer lines, so maps have far fewer lines to draw:
@@ -116,31 +97,14 @@ function join(pieces: { colour: string; points: [number, number][] }[], toleranc
   return joined
 }
 
-/** Google's encoded polyline format (5 decimal places), from flat
- *  lon, lat pairs. */
-function encode(flat: number[]): string {
-  let out = '', lastLat = 0, lastLon = 0
-  const put = (value: number) => {
-    let v = value < 0 ? ~(value << 1) : value << 1
-    while (v >= 0x20) { out += String.fromCharCode((0x20 | (v & 0x1f)) + 63); v >>= 5 }
-    out += String.fromCharCode(v + 63)
-  }
-  for (let i = 0; i < flat.length; i += 2) {
-    const lat = Math.round(flat[i + 1] * 1e5), lon = Math.round(flat[i] * 1e5)
-    put(lat - lastLat); put(lon - lastLon)
-    lastLat = lat; lastLon = lon
-  }
-  return out
-}
-
 /** Every step's lines, encoded. */
 const steps: { zoom: number; drawn: number; lines: string[][] }[] = []
-for (const [i, drawn] of DRAWN_ZOOMS.entries()) {
-  const zoom = i ? drawn - 1 : MIN_ZOOM
+for (const { zoom, drawn } of STEPS) {
   const metresPerPoint = METRES_AT_ZOOM_0 / 2 ** drawn
-  const toLonLat = (points: [number, number][]) =>
-    simplify(points, metresPerPoint / 4).flatMap(([x, y]) => fromMercator(x, y).map((v) => Math.round(v * 1e6) / 1e6))
-  const lines = join(drawing(metresPerPoint), metresPerPoint / 2).map(({ colour, points }) => [colour, encode(toLonLat(points))])
+  const round = (v: number) => Math.round(v * 1e6) / 1e6
+  const toLatLon = (points: [number, number][]) =>
+    simplify(points, metresPerPoint / 4).map(([x, y]): LatLon => { const [lon, lat] = fromMercator(x, y); return [round(lat), round(lon)] })
+  const lines = join(drawing(metresPerPoint), metresPerPoint / 2).map(({ colour, points }) => [colour, encode(toLatLon(points))])
   steps.push({ zoom, drawn, lines })
   console.error(`zoom ${zoom}+ (drawn for ${drawn}): ${lines.length} lines`)
 }

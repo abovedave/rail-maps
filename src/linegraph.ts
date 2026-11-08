@@ -14,40 +14,13 @@
 //
 // Needs osmium (`brew install osmium-tool`).
 
-import { spawn, spawnSync } from 'node:child_process'
-import { createInterface } from 'node:readline'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { lineColour, routeLine } from './lines.ts'
-
-type LatLon = [number, number]
+import { filtered, inNorthernIreland, type LatLon } from './osm.ts'
 
 const pbf = process.argv[2]
 if (!pbf) {
   console.error('Usage: node src/linegraph.ts <extract.osm.pbf>')
   process.exit(1)
-}
-
-function run(cmd: string, cmdArgs: string[]) {
-  const result = spawnSync(cmd, cmdArgs, { stdio: ['ignore', 'ignore', 'inherit'] })
-  if (result.error) throw new Error(`${cmd} failed: ${result.error.message}`)
-  if (result.status !== 0) throw new Error(`${cmd} ${cmdArgs[0]} exited with ${result.status}`)
-}
-
-/** OPL escapes special characters in tags as %hex%. */
-function unescape(value: string): string {
-  return value.replace(/%([0-9a-f]+)%/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
-}
-
-function parseTags(field: string | undefined): Record<string, string> {
-  const tags: Record<string, string> = {}
-  if (!field || field.length <= 1) return tags
-  for (const pair of field.slice(1).split(',')) {
-    const eq = pair.indexOf('=')
-    if (eq > 0) tags[unescape(pair.slice(0, eq))] = unescape(pair.slice(eq + 1))
-  }
-  return tags
 }
 
 /** Routes whose train company isn't known, by name, to report. */
@@ -74,16 +47,7 @@ function isTrack(tags: Record<string, string>): boolean {
     tags['railway:preserved'] !== 'yes' && tags.usage !== 'tourism'
 }
 
-/** Northern Ireland isn't on National Rail. */
-function inNorthernIreland([lat, lon]: LatLon): boolean {
-  return lon < -5.45 && lat > 54.0 && lat < 55.4
-}
-
 // MARK: Read services
-
-const work = mkdtempSync(join(tmpdir(), 'linegraph-'))
-const routes = join(work, 'routes.osm.pbf')
-run('osmium', ['tags-filter', pbf, 'r/route=train,light_rail', '-o', routes, '--overwrite'])
 
 const coords = new Map<number, LatLon>()
 const names = new Map<number, string>()
@@ -108,34 +72,20 @@ function usedPart(nodes: number[], before: number[] | undefined, after: number[]
   return nodes.slice(Math.min(from, to), Math.max(from, to) + 1)
 }
 
-// OPL lists nodes, then ways, then relations
-const opl = spawn('osmium', ['cat', routes, '-f', 'opl,add_metadata=false'])
-for await (const line of createInterface({ input: opl.stdout })) {
-  const fields = line.split(' ')
-  const type = fields[0][0]
-  const id = Number(fields[0].slice(1))
-  const tags = parseTags(fields.find((f) => f[0] === 'T'))
+for await (const { type, id, tags, at, nodes, members } of filtered(pbf, ['r/route=train,light_rail'])) {
   if (type === 'n') {
-    const x = fields.find((f) => f[0] === 'x')
-    const y = fields.find((f) => f[0] === 'y')
-    if (x && y && x.length > 1) coords.set(id, [Number(y.slice(1)), Number(x.slice(1))])
+    if (at) coords.set(id, at)
     if (tags.name) names.set(id, tags.name)
   } else if (type === 'w') {
-    if (!isTrack(tags)) continue
-    const refs = fields.find((f) => f[0] === 'N')
-    if (refs && refs.length > 1) wayNodes.set(id, refs.slice(1).split(',').map((r) => Number(r.slice(1))).filter((n) => coords.has(n)))
-  } else if (type === 'r') {
+    if (isTrack(tags) && nodes!.length) wayNodes.set(id, nodes!.filter((n) => coords.has(n)))
+  } else {
     const service = serviceLine(tags)
     if (!service) continue
-    // Members, in route order: w123@role,n456@role,…
     const ways: number[][] = []
     const stops = new Set<number>()
-    for (const member of (fields.find((f) => f[0] === 'M') ?? 'M').slice(1).split(',')) {
-      const at = member.indexOf('@')
-      const memberId = Number(member.slice(1, at))
-      const role = member.slice(at + 1)
-      if (member[0] === 'w' && wayNodes.get(memberId)?.length! > 1) ways.push(wayNodes.get(memberId)!)
-      if (member[0] === 'n' && role.startsWith('stop')) { stopNodes.add(memberId); stops.add(memberId) }
+    for (const member of members!) {
+      if (member.type === 'w' && wayNodes.get(member.id)?.length! > 1) ways.push(wayNodes.get(member.id)!)
+      if (member.type === 'n' && member.role.startsWith('stop')) { stopNodes.add(member.id); stops.add(member.id) }
     }
     ways.forEach((nodes, i) => {
       const used = usedPart(nodes, ways[i - 1], ways[i + 1], stops)
@@ -146,7 +96,6 @@ for await (const line of createInterface({ input: opl.stdout })) {
     })
   }
 }
-rmSync(work, { recursive: true, force: true })
 
 // MARK: Build the graph
 
