@@ -21,8 +21,9 @@ downloads the extract into `vendor/osm`, or a newer one if Geofabrik has it
 
 ## Pipeline
 
-`npm run build` runs steps 2 to 5 in turn; each is also its own script
-(`npm run linegraph`, `topo`, `tidy`, `render`), to re-run from any step.
+`npm run build` runs steps 2 to 5 in turn, then the track graph; each is
+also its own script (`npm run linegraph`, `topo`, `tidy`, `render`,
+`tracks`), to re-run from any step.
 
 | Step | Tool | Output |
 |---|---|---|
@@ -32,6 +33,10 @@ downloads the extract into `vendor/osm`, or a newer one if Geofabrik has it
 | 4. Tidy and order | `src/tidy.ts` simplifies knots `topo` leaves (junctions under 200 m apart become one, short parallel ways one), then LOOM `loom` orders the lines on each corridor | `out/gb.map.json` |
 | 5. Draw | `src/render.ts`: LOOM `transitmap` draws lines side by side, for each zoom in `DRAWN_ZOOMS` | `out/gb.transit.json` |
 | 6. Show | `web/map.js` with MapKit JS, or the app | the map |
+| Track graph | `src/tracks.ts`: all running track, split at junctions and the app's stations, for routing trains along real track | `out/gb.tracks.json` |
+
+`src/osm.ts` (reading the extract with osmium) and `src/geo.ts`
+(simplifying and encoding lines) are shared by the steps.
 
 **Lines.** National Rail is one line, the base network, rather than one per
 train company. A few networks people know by name have their own line,
@@ -54,14 +59,14 @@ lines. `out/gb.svg` is a preview of the whole network.
 
 ## Updating the app
 
-the app (in `../the app`) shows `out/gb.transit.json` and builds its own
-track graph for routing from the same extract in `vendor/osm/`:
+the app (in `../the app`) shows `out/gb.transit.json`, and routes trains
+along `out/gb.tracks.json`. The track graph snaps the app's stations
+(`../app/api/public/stations.json`) to the track:
 
 ```sh
 npm run osm                      # latest OSM extract
 npm run build                    # all of Britain: about 10 minutes, 24 GB of memory
-npm run app                 # copy out/gb.transit.json into the app
-(cd ../app/api && npm run tracks)
+npm run app                 # copy both files into the app
 ```
 
 Changing how lines are grouped or coloured (`src/lines.ts`) needs the whole
