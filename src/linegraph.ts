@@ -53,6 +53,10 @@ const coords = new Map<number, LatLon>()
 const names = new Map<number, string>()
 const wayNodes = new Map<number, number[]>()
 const stopNodes = new Set<number>()
+/** Stations and stop positions on the track, the stops of routes listing
+ *  none of their own (some tagged only as Network Rail's): topo trims a
+ *  line back to its last station. */
+const trackStops = new Set<number>()
 /** The lines on each stretch of track between neighbouring nodes. */
 const segmentLines = new Map<string, Set<string>>()
 const segment = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`)
@@ -76,6 +80,7 @@ for await (const { type, id, tags, at, nodes, members } of filtered(pbf, ['r/rou
   if (type === 'n') {
     if (at) coords.set(id, at)
     if (tags.name) names.set(id, tags.name)
+    if (tags.name && (['stop', 'station', 'halt'].includes(tags.railway) || tags.public_transport === 'stop_position') && tags.train !== 'no' && tags.usage !== 'tourism') trackStops.add(id)
   } else if (type === 'w') {
     if (isTrack(tags) && nodes!.length) wayNodes.set(id, nodes!.filter((n) => coords.has(n)))
   } else {
@@ -87,6 +92,7 @@ for await (const { type, id, tags, at, nodes, members } of filtered(pbf, ['r/rou
       if (member.type === 'w' && wayNodes.get(member.id)?.length! > 1) ways.push(wayNodes.get(member.id)!)
       if (member.type === 'n' && member.role.startsWith('stop')) { stopNodes.add(member.id); stops.add(member.id) }
     }
+    if (!stops.size) for (const n of ways.flat()) if (trackStops.has(n)) { stopNodes.add(n); stops.add(n) }
     ways.forEach((nodes, i) => {
       const used = usedPart(nodes, ways[i - 1], ways[i + 1], stops)
       for (let j = 1; j < used.length; j++) {

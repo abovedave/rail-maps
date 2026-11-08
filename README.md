@@ -46,8 +46,10 @@ Heathrow Express, Merseyrail and the Tyne and Wear Metro. See `LINES` and
 `OWN_LINES` in `src/lines.ts`, which also set each line's colour.
 A route's company is matched against
 `TRAIN_COMPANIES`, which lists the other names OSM uses for each. Routes of
-no known company (heritage railways, mistagged track) are left out and
-listed by the build.
+no known company are drawn as National Rail if tagged `network` or
+`operator` National Rail or Network Rail (the Felixstowe branch), and
+otherwise (heritage railways, mistagged track) left out and listed by the
+build.
 
 **Drawing.** Lines sharing track are drawn side by side with LOOM's
 `transitmap`, 2 pt wide, for zoom 13 (shown from zoom 5, maps simplifying

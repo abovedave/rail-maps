@@ -83,12 +83,19 @@ export function trainCompany(tags: Record<string, string>): string | undefined {
   }
 }
 
+/** Networks and operators of routes with no train company that are still
+ *  National Rail lines (the Felixstowe branch, the Bittern Line). */
+const NATIONAL_RAIL = new Set(['national rail', 'network rail'])
+
 /** The line a route is drawn as: London's lines by their `ref`, companies
  *  with their own line, otherwise National Rail. Undefined for routes of no
- *  known company. */
+ *  known company, unless tagged as National Rail or Network Rail's. */
 export function routeLine(tags: Record<string, string>): string | undefined {
   if (tags.ref && tags.ref in LONDON_REFS) return LONDON_REFS[tags.ref]
   const company = trainCompany(tags)
-  if (!company) return undefined
+  if (!company) {
+    const national = [tags.network, tags.operator].some((name) => name && NATIONAL_RAIL.has(name.trim().toLowerCase()))
+    return national ? 'National Rail' : undefined
+  }
   return OWN_LINES.has(company) ? company : 'National Rail'
 }
