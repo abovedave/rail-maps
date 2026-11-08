@@ -1,20 +1,22 @@
 // How services are grouped into lines, and how lines are drawn.
 
-/** The lines, each drawn in its colour (hex), width (points) and from a
- *  zoom level, so zoomed out shows the main network and not every line.
- *  National Rail is one line, with Intercity services as their
- *  own. A few services that people know by their own name have their own
- *  line. `dark` is a colour for dark maps, where `colour` is too dark to see. */
+/** The lines, each drawn in its colour (hex) and width (points). National
+ *  Rail is one line, the base network; a few networks people know by their
+ *  own name have their own, drawn over it where they share track. `dark` is
+ *  a colour for dark maps, where `colour` is too dark to see. `minZoom` is
+ *  the zoom a line is shown from. */
 export const LINES: Record<string, { colour: string; dark?: string; width: number; minZoom: number }> = {
-  'Intercity': { colour: 'D7263D', width: 1, minZoom: 0 },
-  'National Rail': { colour: '1D2D5C', dark: 'B9C6E4', width: 1, minZoom: 7 },
-  'Elizabeth line': { colour: '9364CC', width: 1, minZoom: 7 },
-  'London Overground': { colour: 'EE7623', width: 1, minZoom: 7 },
-  'Heathrow Express': { colour: '5B2C6F', width: 1, minZoom: 7 },
-  'Merseyrail': { colour: 'E6B800', width: 1, minZoom: 7 },
-  'Tyne and Wear Metro': { colour: 'F59B00', width: 1, minZoom: 7 },
+  'National Rail': { colour: '1D2D5C', dark: 'B9C6E4', width: 2, minZoom: 0 },
+  'Elizabeth line': { colour: '9364CC', width: 2, minZoom: 0 },
+  'London Overground': { colour: 'EE7623', width: 2, minZoom: 0 },
+  'Thameslink': { colour: 'D6007F', width: 2, minZoom: 0 },
+  'Southeastern': { colour: '00A3E0', width: 2, minZoom: 0 },
+  'South Western Railway': { colour: 'D7263D', width: 2, minZoom: 0 },
+  'Heathrow Express': { colour: '5B2C6F', width: 2, minZoom: 0 },
+  'Merseyrail': { colour: 'E6B800', width: 2, minZoom: 0 },
+  'Tyne and Wear Metro': { colour: 'F59B00', width: 2, minZoom: 0 },
 }
-export const lineStyle = (line: string): (typeof LINES)[string] => LINES[line] ?? { colour: '808080', width: 1, minZoom: 8 }
+export const lineStyle = (line: string): (typeof LINES)[string] => LINES[line] ?? { colour: '808080', width: 2, minZoom: 0 }
 export const lineColour = (line: string) => lineStyle(line).colour
 
 /** London's lines, by the `ref` of their `route=train` relations: the
@@ -30,7 +32,7 @@ const LONDON_REFS: Record<string, string> = {
 }
 
 /** Companies drawn as their own line. */
-const OWN_LINES = new Set(['Heathrow Express', 'Merseyrail', 'Tyne and Wear Metro'])
+const OWN_LINES = new Set(['Thameslink', 'Southeastern', 'South Western Railway', 'Heathrow Express', 'Merseyrail', 'Tyne and Wear Metro'])
 
 /** Britain's train companies, each with the other names OpenStreetMap uses
  *  for it (old names, owners, misspellings). */
@@ -83,41 +85,12 @@ export function trainCompany(tags: Record<string, string>): string | undefined {
   }
 }
 
-/** A route, for picking its line. */
-export type Route = { company: string; name: string; service: string }
-
-const named = (pattern: RegExp) => (r: Route) => pattern.test(r.name)
-const between = (a: string, b: string) => named(new RegExp(`${a}.*${b}|${b}.*${a}`))
-
-/** Intercity services: [company, which of its routes
- *  (all if left out)]. Companies running both long-distance and local
- *  trains are split by route name or service type. */
-const INTERCITY: [string, ((r: Route) => boolean)?][] = [
-  ['Avanti West Coast'],
-  ['LNER'],
-  ['Lumo'],
-  ['Grand Central'],
-  ['Hull Trains'],
-  ['Caledonian Sleeper'],
-  ['TransPennine Express'],
-  ['Eurostar'],
-  // All but its local routes around Birmingham
-  ['CrossCountry', (r) => !/Stansted/.test(r.name) && !between('Birmingham', 'Nottingham')(r) && !between('Cardiff', 'Nottingham')(r)],
-  // Paddington's long-distance trains, not the Thames Valley's
-  ['Great Western Railway', (r) => /London Paddington/.test(r.name) && !/Didcot|Oxford|Reading|Newbury|Bedwyn/.test(r.name)],
-  ['East Midlands Railway', (r) => /London|St Pancras/.test(r.name) || between('Norwich', 'Liverpool')(r)],
-  ['Greater Anglia', between('London', 'Norwich')],
-  ['Southeastern', (r) => r.service === 'high_speed' || /High Speed|St Pancras/.test(r.name)],
-]
-
 /** The line a route is drawn as: London's lines by their `ref`, companies
- *  with their own line, Intercity services, otherwise National Rail. Undefined for routes of no known company. */
+ *  with their own line, otherwise National Rail. Undefined for routes of no
+ *  known company. */
 export function routeLine(tags: Record<string, string>): string | undefined {
   if (tags.ref && tags.ref in LONDON_REFS) return LONDON_REFS[tags.ref]
   const company = trainCompany(tags)
   if (!company) return undefined
-  if (OWN_LINES.has(company)) return company
-  const route = { company, name: tags.name ?? '', service: tags.service ?? '' }
-  if (INTERCITY.some(([c, when]) => c === company && (!when || when(route)))) return 'Intercity'
-  return 'National Rail'
+  return OWN_LINES.has(company) ? company : 'National Rail'
 }

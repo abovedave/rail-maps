@@ -78,11 +78,15 @@ const allowed = (n: string, line: string, x: string, y: string) =>
  *  e between them: a line can go between two of their tracks only as it
  *  could before, at the same junction, or from one to the other along e. */
 function joinedRestrictions(e: any, a: string, b: string) {
-  const link = new Set(e.properties.lines.map((l: any) => l.id))
-  const tracks = [a, b].flatMap((at) => edgesAt.get(at)!.filter((x) => x !== e)
+  // Lines can go between them along any track joining them, not just e
+  const links = edgesAt.get(a)!.filter((x) => other(x, a) === b)
+  const link = new Set(links.flatMap((x) => x.properties.lines.map((l: any) => l.id)))
+  const tracks = [a, b].flatMap((at) => edgesAt.get(at)!.filter((x) => !links.includes(x))
     .map((x) => ({ at, to: other(x, at), lines: new Set<string>(x.properties.lines.map((l: any) => l.id)) })))
     .filter((t) => t.to !== a && t.to !== b)
-  const conns: any[] = []
+  // Restrictions name neighbours, not tracks, so a turn between two is
+  // allowed if it was along any of the tracks to them
+  const turns = new Map<string, { line: string; from: string; to: string; ok: boolean }>()
   for (const [i, p] of tracks.entries()) {
     for (const q of tracks.slice(i + 1)) {
       if (p.to === q.to) continue
@@ -91,11 +95,15 @@ function joinedRestrictions(e: any, a: string, b: string) {
         const ok = p.at === q.at
           ? allowed(p.at, line, p.to, q.to)
           : link.has(line) && allowed(p.at, line, p.to, q.at) && allowed(q.at, line, p.at, q.to)
-        if (!ok) conns.push({ line, node_from: p.to, node_to: q.to }, { line, node_from: q.to, node_to: p.to })
+        const key = [line, ...[p.to, q.to].sort()].join(' ')
+        const turn = turns.get(key)
+        if (turn) turn.ok ||= ok
+        else turns.set(key, { line, from: p.to, to: q.to, ok })
       }
     }
   }
-  return conns
+  return [...turns.values()].filter((t) => !t.ok)
+    .flatMap(({ line, from, to }) => [{ line, node_from: from, node_to: to }, { line, node_from: to, node_to: from }])
 }
 
 /** Joins junctions linked by a track shorter than MIN_TRACK into one, at
@@ -137,12 +145,40 @@ function joinJunctions() {
   return joined
 }
 
+/** The turn restrictions at one end of ways merged into `kept`: each line
+ *  can turn from it as it could from any of them. */
+function carryTurns(end: string, kept: any, merged: any[]) {
+  const node = nodes.get(end)
+  if (!node?.properties.excluded_conn) return
+  const next = (way: any) => other(way.edges.find((e: any) => e.properties.from === end || e.properties.to === end), end)
+  const k = next(kept)
+  const has = (way: any, line: string) => way.lines.some((l: any) => l.id === line)
+  const excluded = (line: string, a: string, b: string) => node.properties.excluded_conn.some((c: any) => c.line === line
+    && ((c.node_from === a && c.node_to === b) || (c.node_from === b && c.node_to === a)))
+  const conns: any[] = []
+  for (const c of node.properties.excluded_conn) {
+    const x = c.node_from === k ? c.node_to : c.node_to === k ? c.node_from : undefined
+    // A line kept from turning off `kept` can if it could from a merged way
+    if (x !== undefined && merged.some((way) => has(way, c.line) && !excluded(c.line, next(way), x))) continue
+    conns.push(c)
+  }
+  // A line new to `kept` can't turn where it couldn't from its merged ways
+  for (const way of merged) {
+    const d = next(way)
+    for (const c of node.properties.excluded_conn) {
+      if (has(kept, c.line) || (c.node_from !== d && c.node_to !== d)) continue
+      conns.push({ ...c, node_from: c.node_from === d ? k : c.node_from, node_to: c.node_to === d ? k : c.node_to })
+    }
+  }
+  node.properties.excluded_conn = conns
+}
+
 /** Of short ways of about the same length between the same two points,
  *  keeps the shortest, carrying all their lines. */
 function mergeParallel() {
   // Where ways start and end: junctions, ends and stations
   const isEnd = (n: string) => edgesAt.get(n)?.length !== 2 || isStation(n)
-  const ways = new Map<string, { lines: any[]; edges: any[]; inner: string[]; length: number }[]>()
+  const ways = new Map<string, { ends: string[]; lines: any[]; edges: any[]; inner: string[]; length: number }[]>()
   const walked = new Set<any>()
   const loops: any[][] = []
   for (const start of edgesAt.keys()) {
@@ -167,7 +203,7 @@ function mergeParallel() {
       if (new Set(way.map(linesOf)).size !== 1) continue
       const ends = [start, at].sort().join(' ')
       ;(ways.get(ends) ?? ways.set(ends, []).get(ends)!).push({
-        lines: way[0].properties.lines, edges: way, inner, length: way.reduce((sum, e) => sum + metres(e.geometry.coordinates), 0),
+        ends: [start, at], lines: way[0].properties.lines, edges: way, inner, length: way.reduce((sum, e) => sum + metres(e.geometry.coordinates), 0),
       })
     }
   }
@@ -178,6 +214,7 @@ function mergeParallel() {
     group.sort((a, b) => a.length - b.length)
     const lines = new Map<string, any>()
     for (const way of group) for (const l of way.lines) lines.set(l.id, l)
+    for (const end of group[0].ends) carryTurns(end, group[0], group.slice(1))
     for (const e of group[0].edges) e.properties.lines = [...lines.values()]
     for (const way of group.slice(1)) {
       for (const e of way.edges) dropped.add(e)

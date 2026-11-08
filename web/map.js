@@ -80,18 +80,23 @@ function overlaysAt(index) {
   return overlays.get(index)
 }
 
-/** How many zoom levels out from a drawing its lines keep thinning, halving
- *  each level, to keep apart (as in the app). */
-const THINNEST_ZOOMS = 1
+/** Apple's road widths in points at each zoom level from 0, as the app gets
+ *  them from MKRoadWidthAtZoomScale, for lines to widen and narrow with. */
+const ROAD_POINTS = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 6, 6, 7, 9, 11, 12, 15, 16]
+const roadAt = (z) => {
+  const i = Math.max(0, Math.min(ROAD_POINTS.length - 1, Math.round(z)))
+  return ROAD_POINTS[i]
+}
 
-/** How much bigger than its step to draw the lines at a zoom: side by side,
- *  their spacing is fixed on the ground, so widths follow it, from half a
- *  level closer in than it's drawn for (past that, lines stay that wide and
- *  spread apart) to THINNEST_ZOOMS further out (past that, they stay that
- *  thin and close up). Single lines stay as they are. In tenths of a zoom
- *  level, so overlays aren't restyled every frame. */
-const scaleAt = (z, index) => transit.steps[index].bundled === false ? 1
-  : 2 ** (Math.round(Math.max(-THINNEST_ZOOMS, Math.min(0.5, z - (transit.steps[index].drawn ?? transit.steps[index].zoom))) * 10) / 10)
+/** How much faster lines widen than roads, closer in (lines side by side
+ *  have room to, as their gaps widen faster still; as in the app). */
+const WIDTH_GROWTH = 1
+
+/** How much wider than drawn to show a step's lines at a zoom: side by side,
+ *  as roads widen and narrow from the zoom it's drawn for, to the power of
+ *  WIDTH_GROWTH, no thinner than half (as in the app). Roads change width
+ *  in whole steps, so overlays aren't restyled every frame. */
+const scaleAt = (z, index) => Math.max(0.5, (roadAt(z) / roadAt(transit.steps[index].drawn ?? transit.steps[index].zoom)) ** WIDTH_GROWTH)
 
 /** The map's zoom level, from its size on screen. */
 function zoom() {
@@ -115,7 +120,7 @@ const stations = stationSets[0]
 
 /** A station's dots: one on each line, side by side across the lines, or
  *  one white dot. Turned back by the map's rotation. */
-function dots(station, coloured, labelled, scale) {
+function dots(station, coloured, labelled, scale, spread) {
   // A zero-size anchor (MapKit JS pins an annotation's bottom centre to its
   // coordinate), with the dots centred on it
   const anchor = document.createElement('div')
@@ -125,7 +130,7 @@ function dots(station, coloured, labelled, scale) {
   const centred = 'position:absolute;left:0;top:0;'
   if (coloured) {
     const size = transit.linePoints * scale + 3
-    element.style.cssText = `${centred}display:flex;gap:${pitch * scale - size}px;transform:translate(-50%,-50%) rotate(${station.angle + 90 - map.rotation}deg)`
+    element.style.cssText = `${centred}display:flex;gap:${pitch * spread - size}px;transform:translate(-50%,-50%) rotate(${station.angle + 90 - map.rotation}deg)`
     // Leading is the left of the lines' direction; colours run right to left
     for (const colour of [...station.colours].reverse()) {
       const dot = document.createElement('div')
@@ -140,7 +145,7 @@ function dots(station, coloured, labelled, scale) {
     const label = document.createElement('div')
     label.className = 'label'
     label.textContent = station.name
-    const offset = coloured ? (station.colours.length * pitch * scale) / 2 + 6 : 7
+    const offset = coloured ? (station.colours.length * pitch * spread) / 2 + 6 : 7
     label.style.cssText = `position:absolute;left:${offset}px;top:0;transform:translateY(-50%)`
     anchor.append(label)
   }
@@ -175,17 +180,19 @@ let shownAnnotations = new Map()
 function showStations(z, scale) {
   const wanted = new Map()
   if (z >= STATIONS_ZOOM) {
-    const { stations: set } = transit.steps[stepIndex(z)]
+    const { stations: set, bundled, drawn } = transit.steps[stepIndex(z)]
+    // Lines' spacing is fixed on the ground, so it doubles each zoom level in
+    const spread = bundled === false ? 1 : 2 ** (Math.round((z - drawn) * 10) / 10)
     const coloured = z >= COLOURED_DOTS_ZOOM, labelled = z >= LABELS_ZOOM
     const { center, span } = map.region
     // The view and a quarter of it around, so small pans keep their dots
     const inView = stationSets[set].filter((s) => Math.abs(s.coordinate.latitude - center.latitude) < span.latitudeDelta * 0.75
       && Math.abs(s.coordinate.longitude - center.longitude) < span.longitudeDelta * 0.75)
     // Coloured dots are sized by the scale and turned by the map's rotation
-    const look = coloured ? `${scale}|${Math.round(map.rotation)}` : ''
+    const look = coloured ? `${scale}|${spread}|${Math.round(map.rotation)}` : ''
     for (const s of thinned(inView, Math.round(z))) wanted.set(`${s.name}|${s.coordinate.latitude}|${coloured}|${labelled}|${look}`, s)
     for (const [key, s] of wanted) {
-      wanted.set(key, shownAnnotations.get(key) ?? new mapkit.Annotation(s.coordinate, () => dots(s, coloured, labelled, scale), {
+      wanted.set(key, shownAnnotations.get(key) ?? new mapkit.Annotation(s.coordinate, () => dots(s, coloured, labelled, scale, spread), {
         title: s.name, calloutEnabled: true,
       }))
     }

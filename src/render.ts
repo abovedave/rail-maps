@@ -36,18 +36,21 @@ const DEFAULT_POINTS = 1
 /** The furthest out the map is drawn. */
 const MIN_ZOOM = 5
 /** From this zoom in, lines sharing track are drawn side by side. Further
- *  out each corridor is one line, in its most important line's colour
+ *  out each track is one line, in its most important line's colour
  *  (priority): side by side, their bundles are wider than the junctions they
- *  turn through and fold into knots. At MIN_ZOOM, lines are side by side
- *  throughout, their bundles shrinking to single lines zoomed out. */
-const BUNDLE_ZOOM = 5
+ *  turn through and fold into knots. Past MAX_ZOOM, there are no bundles. */
+const MAX_ZOOM = 15
+const BUNDLE_ZOOM = 13
 /** The zooms lines side by side are drawn for: the same lines, with spacing
  *  of a fixed number of points at each, so the map swaps between them as it
  *  zooms (from a level before each), scaling widths in between. */
-const BUNDLE_DRAWN = [13]
-/** Which line a corridor is drawn as, zoomed out: Intercity, then lines
- *  with their own name, then National Rail. */
-const priority = (line: string) => (line === 'Intercity' ? 0 : line === 'National Rail' ? 2 : 1)
+const BUNDLE_DRAWN: number[] = [13]
+/** The zoom single lines are their set width at (maps widen and narrow them
+ *  from there as Apple's roads do). */
+const WIDTH_ZOOM = 12
+/** Which line a track is drawn as, where lines share it: lines with their
+ *  own name, then National Rail. */
+const priority = (line: string) => (line === 'National Rail' ? 1 : 0)
 /** Web Mercator metres per screen point at zoom 0. */
 const METRES_AT_ZOOM_0 = 156_543.034
 
@@ -174,10 +177,10 @@ function encode(flat: number[]): string {
 }
 
 /** Every step's lines, encoded. */
-// Zoomed out, lines aren't side by side, so a drawing doesn't depend on the
-// zoom: one is drawn for each set of lines shown (LINES' minZoom), with the
-// detail of the closest zoom it's shown at. Closer in, one for all zooms.
-const shownAt = (zoom: number) => Object.keys(LINES).filter((l) => lineStyle(l).minZoom <= zoom).join('|')
+// Single lines aren't side by side, so a drawing doesn't depend on the zoom:
+// one is drawn for each set of lines shown (LINES' minZoom) and graph
+// (bands.ts), with the detail of the closest zoom it's shown at
+const shownAt = (zoom: number) => Object.keys(LINES).filter((l) => lineStyle(l).minZoom <= zoom).join('|') + mapFile(bandAt(zoom))
 const drawings: { zoom: number; detail: number; bundled: boolean }[] = []
 for (let zoom = MIN_ZOOM; zoom < BUNDLE_ZOOM; zoom++) {
   const last = drawings[drawings.length - 1]
@@ -198,7 +201,7 @@ for (const { zoom, detail, bundled: isBundled } of drawings) {
     (isBundled ? simplify(points, metresPerPoint / 4) : points)
       .flatMap(([x, y]) => fromMercator(x, y).map((v) => Math.round(v * 1e6) / 1e6))
   const lines = join(pieces, metresPerPoint / 2).map(({ colour, points }) => [colour, encode(toLonLat(points))])
-  steps.push({ zoom, drawn: detail, bundled: isBundled, stations: BANDS.indexOf(band), lines })
+  steps.push({ zoom, drawn: isBundled ? detail : WIDTH_ZOOM, bundled: isBundled, stations: BANDS.indexOf(band), lines })
   console.error(`zoom ${zoom}${detail > zoom ? `–${detail}` : ''}: ${lines.length} lines`)
 }
 
@@ -303,7 +306,10 @@ function stopDots(graph: Buffer) {
     const edge = (edgesAt.get(p.id) ?? []).sort((a, b) => b.properties.lines.length - a.properties.lines.length)[0]
     if (!edge) return []
     const notServing = new Set<string>(p.not_serving ?? [])
-    const colours = (edge.properties.lines as any[]).filter((l) => !notServing.has(l.id)).map((l) => (l.color as string).toLowerCase())
+    // Side by side, a dot on each line; otherwise one, as the track's drawn
+    const serving = (edge.properties.lines as any[]).filter((l) => !notServing.has(l.id))
+    const colours = (BUNDLE_DRAWN.length ? serving : [...serving].sort((a, b) => priority(a.id) - priority(b.id)).slice(0, 1))
+      .map((l) => (l.color as string).toLowerCase())
     if (!colours.length) return []
     // Its direction (from → to) over the first or last 30 m at the station
     const c = (edge.geometry.coordinates as [number, number][]).map(([lon, lat]) => [mercX(lon), mercY(lat)] as [number, number])
