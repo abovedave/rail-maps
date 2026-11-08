@@ -28,11 +28,21 @@ const LINE_POINTS = 2
 const GAP_POINTS = 1
 /** The furthest out the map is drawn. */
 const MIN_ZOOM = 5
-/** The zooms the map is drawn for, the first shown from MIN_ZOOM and each
- *  other from a level before: the same lines, spaced a fixed number of
- *  points apart at each, as spacing is fixed on the ground. Maps widen and
- *  narrow lines in between, and simplify them further out. */
-const DRAWN_ZOOMS = [13, 16]
+/** Each whole zoom from MIN_DRAWN_ZOOM to MAX_DRAWN_ZOOM gets a drawing
+ *  of its own, shown within half a level of it, so lines are always close
+ *  to their set spacing: it's fixed on the ground, so a drawing's lines are
+ *  twice as far apart a level in, and half a level out of their own. The
+ *  first is also shown from MIN_ZOOM, where lines sharing track are close
+ *  enough together to show as one: drawn for their own zoom, they'd be
+ *  kilometres apart. */
+const MIN_DRAWN_ZOOM = 9
+const MAX_DRAWN_ZOOM = 18
+/** Each step's first zoom and the zoom it's drawn for. Maps widen and
+ *  narrow lines within a step, and simplify them further out. */
+const STEPS = [
+  { zoom: MIN_ZOOM, drawn: MIN_DRAWN_ZOOM },
+  ...Array.from({ length: MAX_DRAWN_ZOOM - MIN_DRAWN_ZOOM }, (_, i) => ({ zoom: MIN_DRAWN_ZOOM + 1 + i, drawn: MIN_DRAWN_ZOOM + 1 + i })),
+]
 /** Web Mercator metres per screen point at zoom 0. */
 const METRES_AT_ZOOM_0 = 156_543.034
 

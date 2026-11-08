@@ -31,7 +31,7 @@ also its own script (`npm run linegraph`, `topo`, `tidy`, `render`,
 | 2. Line graph | `src/linegraph.ts`: every `route=train` relation, via osmium | `out/gb.linegraph.json` |
 | 3. Merge | `src/topo.ts`, with LOOM `topo`: each line's parallel tracks up to about 95 m apart become one smoothed corridor (about 30 m), then lines merge where they share track (about 50 m), so lines on different tracks nearby (the Elizabeth line under Whitechapel) stay apart | `out/gb.topo.json` |
 | 4. Tidy and order | `src/tidy.ts` simplifies knots `topo` leaves (junctions under 200 m apart become one, short parallel ways one), then LOOM `loom` orders the lines on each corridor | `out/gb.map.json` |
-| 5. Draw | `src/render.ts`: LOOM `transitmap` draws lines side by side, for each zoom in `DRAWN_ZOOMS` | `out/gb.transit.json` |
+| 5. Draw | `src/render.ts`: LOOM `transitmap` draws lines side by side, for each whole zoom from 9 to 18 | `out/gb.transit.json` |
 | 6. Show | `web/map.js` with MapKit JS, or the app | the map |
 | Track graph | `src/tracks.ts`: all running track, split at junctions and the app's stations, for routing trains along real track | `out/gb.tracks.json` |
 
@@ -52,9 +52,11 @@ otherwise (heritage railways, mistagged track) left out and listed by the
 build.
 
 **Drawing.** Lines sharing track are drawn side by side with LOOM's
-`transitmap`, 2 pt wide, for zoom 13 (shown from zoom 5, maps simplifying
-it further out) and zoom 16 (shown from 15, so lines stay close together
-up close): `DRAWN_ZOOMS` in `src/render.ts`.
+`transitmap`, 2 pt wide with 1 pt between, for each whole zoom from 9 to
+18, each shown within half a level of its zoom (zoom 9's from zoom 5, where
+lines sharing track show as one): `STEPS` in `src/render.ts`. Spacing is
+fixed on the ground, so a drawing's lines spread apart as you zoom in;
+drawing every level keeps them within half a level of their set spacing.
 Maps widen and narrow lines as Apple's roads do (`MKRoadWidthAtZoomScale` in
 the app, the same widths in `web/map.js`), and spread station dots with the
 lines. `out/gb.svg` is a preview of the whole network.
