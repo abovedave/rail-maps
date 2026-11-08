@@ -183,10 +183,12 @@ function stopDots(graph: Buffer) {
   }
   return features.filter((f) => f.geometry.type === 'Point' && f.properties.station_label).flatMap((f) => {
     const p = f.properties
-    // The corridor with the most lines through the station
-    const edge = (edgesAt.get(p.id) ?? []).sort((a, b) => b.properties.lines.length - a.properties.lines.length)[0]
-    if (!edge) return []
+    // The corridor with the most lines calling at the station (others may
+    // pass through without calling: the Elizabeth line at Moorgate)
     const notServing = new Set<string>(p.not_serving ?? [])
+    const calling = (e: any) => e.properties.lines.filter((l: any) => !notServing.has(l.id)).length
+    const edge = (edgesAt.get(p.id) ?? []).sort((a, b) => calling(b) - calling(a) || b.properties.lines.length - a.properties.lines.length)[0]
+    if (!edge) return []
     // A dot on each line
     const colours = (edge.properties.lines as any[]).filter((l) => !notServing.has(l.id)).map((l) => (l.color as string).toLowerCase())
     if (!colours.length) return []
