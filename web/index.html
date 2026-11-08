@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GB Transit Map</title>
+  <style>
+    html, body, #map { margin: 0; height: 100%; }
+    body { font: 13px -apple-system, system-ui, sans-serif; }
+    #status { position: absolute; left: 12px; bottom: 28px; padding: 6px 10px; border-radius: 8px;
+      background: rgba(255, 255, 255, 0.9); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); }
+    .label { font: 600 11px -apple-system, system-ui, sans-serif; color: #222; white-space: nowrap;
+      text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff; pointer-events: none; }
+    #status { font-variant-numeric: tabular-nums; }
+  </style>
+  <script src="https://cdn.apple-mapkit.com/mk/5.x.x/mapkit.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="status">Loading…</div>
+  <script type="module" src="map.js"></script>
+</body>
+</html>

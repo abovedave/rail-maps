@@ -1,0 +1,20 @@
+{
+  "name": "gb-transit-map",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Transit map overlays of Britain's railways from OpenStreetMap",
+  "scripts": {
+    "setup": "npm run loom && npm run osm",
+    "loom": "[ -d vendor/loom ] || (git clone --recurse-submodules https://github.com/ad-freiburg/loom.git vendor/loom && git -C vendor/loom apply ../../patches/loom-svg-precision.patch); cmake -S vendor/loom -B vendor/loom/build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build vendor/loom/build -j8 --target topo loom transitmap",
+    "osm": "mkdir -p vendor/osm && curl -fL --progress-bar -z vendor/osm/great-britain-latest.osm.pbf -o vendor/osm/great-britain-latest.osm.pbf https://download.geofabrik.de/europe/great-britain-latest.osm.pbf",
+    "build": "scripts/build.sh",
+    "render": "node src/render.ts",
+    "app": "cp out/gb.transit.json ../app/Public/transit.json",
+    "web": "node --env-file=.env src/serve.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
