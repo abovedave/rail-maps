@@ -1,11 +1,10 @@
 // Shows Britain's transit map on Apple Maps with MapKit JS, from
 // out/gb.transit.json (see src/render.ts), the same way the app does.
 //
-// The lines are drawn ahead of time (src/render.ts): zoomed out, one line per
-// corridor for each set of lines shown; from zoom 13, one drawing of lines
-// side by side by LOOM's transitmap, whose widths are scaled as you zoom to
-// keep in step with its spacing. Stations are a dot on each line calling
-// there, in its colour, or one white dot zoomed out.
+// The lines are drawn ahead of time (src/render.ts), side by side by LOOM's
+// transitmap, for a couple of zooms; their widths are scaled as you zoom, as
+// Apple's roads are. Stations are a dot on each line calling there, in its
+// colour, or one white dot zoomed out.
 
 const status = document.getElementById('status')
 
@@ -62,7 +61,7 @@ function decode(line) {
 /** A line's style, its width times `scale`. */
 const lineStyle = (colour, scale) => new mapkit.Style({
   strokeColor: `#${colour}`,
-  lineWidth: (transit.widths[colour] ?? transit.linePoints) * scale,
+  lineWidth: transit.linePoints * scale,
   lineCap: 'round',
   lineJoin: 'round',
 })
@@ -88,15 +87,11 @@ const roadAt = (z) => {
   return ROAD_POINTS[i]
 }
 
-/** How much faster lines widen than roads, closer in (lines side by side
- *  have room to, as their gaps widen faster still; as in the app). */
-const WIDTH_GROWTH = 1
-
-/** How much wider than drawn to show a step's lines at a zoom: side by side,
- *  as roads widen and narrow from the zoom it's drawn for, to the power of
- *  WIDTH_GROWTH, no thinner than half (as in the app). Roads change width
- *  in whole steps, so overlays aren't restyled every frame. */
-const scaleAt = (z, index) => Math.max(0.5, (roadAt(z) / roadAt(transit.steps[index].drawn ?? transit.steps[index].zoom)) ** WIDTH_GROWTH)
+/** How much wider than drawn to show a step's lines at a zoom: as roads
+ *  widen and narrow from the zoom it's drawn for, no thinner than half (as
+ *  in the app). Roads change width in whole steps, so overlays aren't
+ *  restyled every frame. */
+const scaleAt = (z, index) => Math.max(0.5, roadAt(z) / roadAt(transit.steps[index].drawn))
 
 /** The map's zoom level, from its size on screen. */
 function zoom() {
@@ -111,12 +106,8 @@ const stepIndex = (z) => Math.max(0, transit.steps.findLastIndex((s) => s.zoom <
 
 // MARK: Stations
 
-/** Each zoom band's stations (steps say which), as lines are merged further
- *  out and stations are drawn where their lines are. */
-const stationSets = transit.stationSets.map((set) => set.map(([station, lon, lat, angle, ...colours]) =>
-  ({ name: station, coordinate: new mapkit.Coordinate(lat, lon), angle, colours })))
-/** The stations zoomed in. */
-const stations = stationSets[0]
+const stations = transit.stations.map(([station, lon, lat, angle, ...colours]) =>
+  ({ name: station, coordinate: new mapkit.Coordinate(lat, lon), angle, colours }))
 
 /** A station's dots: one on each line, side by side across the lines, or
  *  one white dot. Turned back by the map's rotation. */
@@ -180,13 +171,13 @@ let shownAnnotations = new Map()
 function showStations(z, scale) {
   const wanted = new Map()
   if (z >= STATIONS_ZOOM) {
-    const { stations: set, bundled, drawn } = transit.steps[stepIndex(z)]
+    const { drawn } = transit.steps[stepIndex(z)]
     // Lines' spacing is fixed on the ground, so it doubles each zoom level in
-    const spread = bundled === false ? 1 : 2 ** (Math.round((z - drawn) * 10) / 10)
+    const spread = 2 ** (Math.round((z - drawn) * 10) / 10)
     const coloured = z >= COLOURED_DOTS_ZOOM, labelled = z >= LABELS_ZOOM
     const { center, span } = map.region
     // The view and a quarter of it around, so small pans keep their dots
-    const inView = stationSets[set].filter((s) => Math.abs(s.coordinate.latitude - center.latitude) < span.latitudeDelta * 0.75
+    const inView = stations.filter((s) => Math.abs(s.coordinate.latitude - center.latitude) < span.latitudeDelta * 0.75
       && Math.abs(s.coordinate.longitude - center.longitude) < span.longitudeDelta * 0.75)
     // Coloured dots are sized by the scale and turned by the map's rotation
     const look = coloured ? `${scale}|${spread}|${Math.round(map.rotation)}` : ''

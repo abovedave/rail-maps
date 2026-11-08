@@ -21,13 +21,16 @@ downloads the extract into `vendor/osm`, or a newer one if Geofabrik has it
 
 ## Pipeline
 
+`npm run build` runs steps 2 to 5 in turn; each is also its own script
+(`npm run linegraph`, `topo`, `tidy`, `render`), to re-run from any step.
+
 | Step | Tool | Output |
 |---|---|---|
 | 1. Download | `npm run osm`: Geofabrik's Great Britain extract | `vendor/osm/great-britain-latest.osm.pbf` |
 | 2. Line graph | `src/linegraph.ts`: every `route=train` relation, via osmium | `out/gb.linegraph.json` |
-| 3. Merge | `src/topo.ts`, with LOOM `topo`: each layer's parallel tracks (the Elizabeth line, the Overground, main line) up to about 95 m apart become one smoothed corridor, then layers merge where they share track (about 60 m), so lines on different tracks nearby (the Elizabeth line under Whitechapel) stay apart | `out/gb.topo.json` |
-| 4. Zoom bands | `src/simplify.ts`, for each zoom band in `src/bands.ts`: merges further with `topo` the further out it's drawn, tidies knots `topo` leaves (`src/tidy.ts`: close junctions become one, short parallel ways one), and orders the lines on each corridor with LOOM `loom` | `out/gb.map.<zoom>.json` |
-| 5. Draw | `src/render.ts`: one line per track, in its line's colour (or LOOM `transitmap` for lines side by side, if `BUNDLE_DRAWN` is set) | `out/gb.transit.json` |
+| 3. Merge | `src/topo.ts`, with LOOM `topo`: each line's parallel tracks up to about 95 m apart become one smoothed corridor (about 30 m), then lines merge where they share track (about 60 m), so lines on different tracks nearby (the Elizabeth line under Whitechapel) stay apart | `out/gb.topo.json` |
+| 4. Tidy and order | `src/tidy.ts` simplifies knots `topo` leaves (junctions under 200 m apart become one, short parallel ways one), then LOOM `loom` orders the lines on each corridor | `out/gb.map.json` |
+| 5. Draw | `src/render.ts`: LOOM `transitmap` draws lines side by side, for each zoom in `DRAWN_ZOOMS` | `out/gb.transit.json` |
 | 6. Show | `web/map.js` with MapKit JS, or the app | the map |
 
 **Lines.** National Rail is one line, the base network, rather than one per
@@ -35,19 +38,19 @@ train company. A few networks people know by name have their own line,
 drawn over it where they share track: the Elizabeth line, London Overground
 (one orange line for all six), Thameslink, Southeastern, South Western Railway,
 Heathrow Express, Merseyrail and the Tyne and Wear Metro. See `LINES` and
-`OWN_LINES` in `src/lines.ts`, which also set each line's colour and width.
+`OWN_LINES` in `src/lines.ts`, which also set each line's colour.
 A route's company is matched against
 `TRAIN_COMPANIES`, which lists the other names OSM uses for each. Routes of
 no known company (heritage railways, mistagged track) are left out and
 listed by the build.
 
-**Drawing.** Each track is one 2 pt line, in the colour of the line using
-it (a named line over National Rail), drawn from the 300 m graph out to zoom
-12 and the detailed one closer in. Maps widen and narrow lines as Apple's
-roads do (`MKRoadWidthAtZoomScale` in the app, the same widths in
-`web/map.js`). Stations are a dot in their line's colour, or white zoomed
-out. (`BUNDLE_DRAWN` in `src/render.ts` instead draws lines sharing track
-side by side with LOOM's `transitmap`, at the zooms listed.) `out/gb.svg` is a preview of the whole network.
+**Drawing.** Lines sharing track are drawn side by side with LOOM's
+`transitmap`, 2 pt wide, for zoom 13 (shown from zoom 5, maps simplifying
+it further out) and zoom 16 (shown from 15, so lines stay close together
+up close): `DRAWN_ZOOMS` in `src/render.ts`.
+Maps widen and narrow lines as Apple's roads do (`MKRoadWidthAtZoomScale` in
+the app, the same widths in `web/map.js`), and spread station dots with the
+lines. `out/gb.svg` is a preview of the whole network.
 
 ## Updating the app
 
@@ -62,20 +65,18 @@ npm run app                 # copy out/gb.transit.json into the app
 ```
 
 Changing how lines are grouped or coloured (`src/lines.ts`) needs the whole
-build. Changing line width or spacing (`src/render.ts`) needs only
-`npm run render` (about a minute), and colours, widths and zoom levels
-(`LINES` in `src/lines.ts`) the same. Changing zoom bands or tidying
-(`src/bands.ts`, `src/tidy.ts`) needs `node src/simplify.ts` (a few
-minutes), then `npm run render`.
+build. Changing line width, spacing or zooms (`src/render.ts`) needs only
+`npm run render` (a few seconds), and colours (`LINES` in `src/lines.ts`)
+the same. Changing tidying (`src/tidy.ts`) needs `npm run tidy`, then
+`npm run render`.
 
 ## Output
 
 `out/gb.transit.json` is every zoom step in one compact file for apps:
 lines as Google encoded polylines, and each station's position, direction
-and the colours of the lines calling there, for drawing its dots (one set
-for each zoom band, as lines are merged further out).
+and the colours of the lines calling there, for drawing its dots.
 
-`out/gb.map.<zoom>.json` (one for each zoom band) is LOOM's GeoJSON line graph: `LineString` edges with
+`out/gb.map.json` is LOOM's GeoJSON line graph: `LineString` edges with
 `from`, `to` and an ordered `lines` array (`id`, `label`, `color`), and
 `Point` nodes, with `station_id` and `station_label` for stations. The first
 line in an edge's `lines` is drawn furthest right, looking from `from` to `to`.

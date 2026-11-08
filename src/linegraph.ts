@@ -91,9 +91,6 @@ const wayNodes = new Map<number, number[]>()
 const stopNodes = new Set<number>()
 /** The lines on each stretch of track between neighbouring nodes. */
 const segmentLines = new Map<string, Set<string>>()
-/** The layers using each stretch, for merging track (see topo.ts): each
- *  line, as each runs on its own track but where it shares it. */
-const segmentLayers = new Map<string, Set<string>>()
 const segment = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`)
 
 /** The part of a way a train uses. Routes list whole OSM ways, but a way
@@ -130,7 +127,6 @@ for await (const line of createInterface({ input: opl.stdout })) {
   } else if (type === 'r') {
     const service = serviceLine(tags)
     if (!service) continue
-    const layer = service
     // Members, in route order: w123@role,n456@role,…
     const ways: number[][] = []
     const stops = new Set<number>()
@@ -146,7 +142,6 @@ for await (const line of createInterface({ input: opl.stdout })) {
       for (let j = 1; j < used.length; j++) {
         const key = segment(used[j - 1], used[j])
         segmentLines.get(key)?.add(service) ?? segmentLines.set(key, new Set([service]))
-        segmentLayers.get(key)?.add(layer) ?? segmentLayers.set(key, new Set([layer]))
       }
     })
   }
@@ -165,7 +160,6 @@ const features: Feature[] = []
 const usedNodes = new Set<number>()
 const lonLat = (n: number) => [coords.get(n)![1], coords.get(n)![0]]
 const linesOf = (a: number, b: number) => [...(segmentLines.get(segment(a, b)) ?? [])].sort().join('|')
-const layersOf = (a: number, b: number) => [...(segmentLayers.get(segment(a, b)) ?? [])].sort().join('|')
 const drawn = new Set<string>()
 let edgeId = 0
 
@@ -181,13 +175,11 @@ function addEdge(piece: number[]) {
       from: `n${piece[0]}`,
       to: `n${piece[piece.length - 1]}`,
       lines: lines.map((l) => ({ id: l, label: l, color: lineColour(l) })),
-      layers: layersOf(piece[0], piece[1]).split('|'),
     },
   })
 }
 
-// Edges follow the ways, split at junctions, stops and where lines or layers
-// change
+// Edges follow the ways, split at junctions, stops and where lines change
 for (const nodes of wayNodes.values()) {
   let piece: number[] = []
   for (let i = 1; i < nodes.length; i++) {
@@ -200,7 +192,7 @@ for (const nodes of wayNodes.values()) {
     }
     drawn.add(key)
     const before = piece[piece.length - 2]
-    if (piece.length > 1 && (splitsAt(a) || linesOf(before, a) !== linesOf(a, b) || layersOf(before, a) !== layersOf(a, b))) {
+    if (piece.length > 1 && (splitsAt(a) || linesOf(before, a) !== linesOf(a, b))) {
       addEdge(piece)
       piece = []
     }

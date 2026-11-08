@@ -1,23 +1,21 @@
 // How services are grouped into lines, and how lines are drawn.
 
-/** The lines, each drawn in its colour (hex) and width (points). National
- *  Rail is one line, the base network; a few networks people know by their
- *  own name have their own, drawn over it where they share track. `dark` is
- *  a colour for dark maps, where `colour` is too dark to see. `minZoom` is
- *  the zoom a line is shown from. */
-export const LINES: Record<string, { colour: string; dark?: string; width: number; minZoom: number }> = {
-  'National Rail': { colour: '1D2D5C', dark: 'B9C6E4', width: 2, minZoom: 0 },
-  'Elizabeth line': { colour: '9364CC', width: 2, minZoom: 0 },
-  'London Overground': { colour: 'EE7623', width: 2, minZoom: 0 },
-  'Thameslink': { colour: 'D6007F', width: 2, minZoom: 0 },
-  'Southeastern': { colour: '00A3E0', width: 2, minZoom: 0 },
-  'South Western Railway': { colour: 'D7263D', width: 2, minZoom: 0 },
-  'Heathrow Express': { colour: '5B2C6F', width: 2, minZoom: 0 },
-  'Merseyrail': { colour: 'E6B800', width: 2, minZoom: 0 },
-  'Tyne and Wear Metro': { colour: 'F59B00', width: 2, minZoom: 0 },
+/** The lines, each drawn in its colour (hex). National Rail is one line,
+ *  the base network; a few networks people know by their own name have
+ *  their own, drawn over it where they share track. `dark` is a colour for
+ *  dark maps, where `colour` is too dark to see. */
+export const LINES: Record<string, { colour: string; dark?: string }> = {
+  'National Rail': { colour: '1D2D5C', dark: 'B9C6E4' },
+  'Elizabeth line': { colour: '9364CC' },
+  'London Overground': { colour: 'EE7623' },
+  'Thameslink': { colour: 'D6007F' },
+  'Southeastern': { colour: '00A3E0' },
+  'South Western Railway': { colour: 'D7263D' },
+  'Heathrow Express': { colour: '5B2C6F' },
+  'Merseyrail': { colour: 'E6B800' },
+  'Tyne and Wear Metro': { colour: 'F59B00' },
 }
-export const lineStyle = (line: string): (typeof LINES)[string] => LINES[line] ?? { colour: '808080', width: 2, minZoom: 0 }
-export const lineColour = (line: string) => lineStyle(line).colour
+export const lineColour = (line: string) => LINES[line]?.colour ?? '808080'
 
 /** London's lines, by the `ref` of their `route=train` relations: the
  *  Overground's six (drawn as one) and the Elizabeth line. */

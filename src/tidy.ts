@@ -10,21 +10,18 @@
 //
 // repeated until neither changes anything.
 //
-//   node src/tidy.ts topo.json [scale] > tidy.json
-//
-// `scale` multiplies the distances below, for maps drawn further out.
+//   node src/tidy.ts topo.json > tidy.json
 
 import { readFileSync } from 'node:fs'
 
-const scale = Number(process.argv[3] ?? 1)
 /** Junctions joined by a track shorter than this, in metres, become one. */
-const MIN_TRACK = 200 * scale
+const MIN_TRACK = 200
 /** How far along a track, in metres, a junction's move eases out, so lines
  *  bend smoothly into where it's moved to. */
-const EASE = 300 * scale
+const EASE = 300
 /** Ways between the same points are merged if they're all shorter than
  *  this, in metres, and none is more than LENGTH_RATIO times another. */
-const MAX_LENGTH = 2000 * scale
+const MAX_LENGTH = 2000
 const LENGTH_RATIO = 1.5
 
 const graph = JSON.parse(readFileSync(process.argv[2], 'utf8'))

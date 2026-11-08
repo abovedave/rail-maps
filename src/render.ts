@@ -1,82 +1,41 @@
-// Draws a line graph at each zoom step with LOOM's `transitmap`, and saves
+// Draws the line graph at each zoom step with LOOM's `transitmap`, and saves
 // the drawn lines as coordinates for maps to show.
 //
-//   node src/render.ts     reads out/gb.map.<zoom>.json, writes out/gb.transit.json
+//   node src/render.ts     reads out/gb.map.json, writes out/gb.transit.json
 //
 // transitmap does the hard part of drawing: lines side by side along each
 // corridor, in loom's order, with curves where they join, cross or branch
-// at junctions. Its widths are in map units, so each zoom step is drawn
-// with widths matching a fixed number of screen points at that zoom, with
-// only the lines shown at that zoom (LINES in lines.ts), from the graph for
-// its zoom band (bands.ts): simpler further out.
+// at junctions. Its widths are in map units, so each step is drawn with
+// widths matching a fixed number of screen points at the zoom it's drawn
+// for, and maps widen and narrow them from there.
 //
 // Writes every step to one file for maps (the app and web/), with each line
-// as a Google encoded polyline, and each band's station dots (see
-// stationDots), as they're where its lines are: { linePoints, pitchPoints,
-// widths: { colour: points }, darkColours: { colour: colour }, stationSets:
-// [[[name, lon, lat, angle, colour, …]]], steps: [{ zoom, stations: index in
-// stationSets, drawn: the zoom it's drawn for, bundled: lines side by side
-// (widths keep in step with the spacing either side of drawn), lines: [[colour, polyline]] }] }. A step is shown
+// as a Google encoded polyline, and the station dots (see stationDots):
+// { linePoints, pitchPoints, darkColours: { colour: colour },
+// stations: [[name, lon, lat, angle, colour, …]], steps: [{ zoom, drawn: the
+// zoom it's drawn for, lines: [[colour, polyline]] }] }. A step is shown
 // from its zoom until the next step's (to the nearest whole zoom).
 
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { BANDS, bandAt, mapFile } from './bands.ts'
-import { LINES, lineColour, lineStyle } from './lines.ts'
+import { LINES } from './lines.ts'
 
-
-/** Space between lines, in screen points. Each line gets a slot as wide as
- *  the widest line (LINES in lines.ts), so wide lines (Intercity) are
- *  as clear of their neighbours as the rest; lines are drawn at their own
- *  width in the middle of their slot. */
+/** Lines' width, and the space between them, in screen points at the zoom
+ *  they're drawn for. */
+const LINE_POINTS = 2
 const GAP_POINTS = 1
-const SLOT_POINTS = Math.max(...Object.values(LINES).map((s) => s.width))
-/** Lines' width where the map has none for a line. */
-const DEFAULT_POINTS = 1
 /** The furthest out the map is drawn. */
 const MIN_ZOOM = 5
-/** From this zoom in, lines sharing track are drawn side by side. Further
- *  out each track is one line, in its most important line's colour
- *  (priority): side by side, their bundles are wider than the junctions they
- *  turn through and fold into knots. Past MAX_ZOOM, there are no bundles. */
-const MAX_ZOOM = 15
-const BUNDLE_ZOOM = 13
-/** The zooms lines side by side are drawn for: the same lines, with spacing
- *  of a fixed number of points at each, so the map swaps between them as it
- *  zooms (from a level before each), scaling widths in between. */
-const BUNDLE_DRAWN: number[] = [13]
-/** The zoom single lines are their set width at (maps widen and narrow them
- *  from there as Apple's roads do). */
-const WIDTH_ZOOM = 12
-/** Which line a track is drawn as, where lines share it: lines with their
- *  own name, then National Rail. */
-const priority = (line: string) => (line === 'National Rail' ? 1 : 0)
+/** The zooms the map is drawn for, the first shown from MIN_ZOOM and each
+ *  other from a level before: the same lines, spaced a fixed number of
+ *  points apart at each, as spacing is fixed on the ground. Maps widen and
+ *  narrow lines in between, and simplify them further out. */
+const DRAWN_ZOOMS = [13, 16]
 /** Web Mercator metres per screen point at zoom 0. */
 const METRES_AT_ZOOM_0 = 156_543.034
 
-/** Each band's graph, by its file. */
-const bandGraphs = new Map(BANDS.map((b) => [mapFile(b), readFileSync(mapFile(b))]))
+const graph = readFileSync('out/gb.map.json')
 
-/** The graph for a zoom level, with only the lines drawn there (see LINES),
- *  so zoomed out shows the main network. Edges left with no lines go. */
-const graphs = new Map<string, Buffer>()
-function graphAt(zoom: number, band = bandAt(zoom)): Buffer {
-  const file = mapFile(band)
-  const parsed = JSON.parse(bandGraphs.get(file)!.toString())
-  const drawn = (id: string) => lineStyle(id).minZoom <= zoom
-  const lines = new Set<string>()
-  for (const f of parsed.features) if (f.geometry.type === 'LineString') for (const l of f.properties.lines) if (drawn(l.id)) lines.add(l.id)
-  const key = `${file} ${[...lines].sort().join('|')}`
-  if (!graphs.has(key)) {
-    parsed.features = parsed.features.flatMap((f: any) => {
-      if (f.geometry.type !== 'LineString') return [f]
-      const kept = f.properties.lines.filter((l: any) => drawn(l.id))
-      return kept.length ? [{ ...f, properties: { ...f.properties, lines: kept } }] : []
-    })
-    graphs.set(key, Buffer.from(JSON.stringify(parsed)))
-  }
-  return graphs.get(key)!
-}
 const R = 6_378_137
 const fromMercator = (x: number, y: number): [number, number] =>
   [(x / R) * (180 / Math.PI), (Math.atan(Math.exp(y / R)) * 360) / Math.PI - 90]
@@ -108,21 +67,35 @@ function simplify(p: [number, number][], tolerance: number) {
  *  way round) into longer lines, so maps have far fewer lines to draw:
  *  transitmap draws each edge and each junction curve as its own piece. */
 function join(pieces: { colour: string; points: [number, number][] }[], tolerance: number) {
-  const key = (colour: string, [x, y]: [number, number]) => `${colour}|${Math.round(x / tolerance)},${Math.round(y / tolerance)}`
-  /** Piece ends by where they are: piece index × 2, + 1 for its last point. */
+  // Ends by grid cell, a tolerance wide: ends that meet are in the same or a
+  // neighbouring cell
+  const cell = (colour: string, x: number, y: number) => `${colour}|${x},${y}`
+  const at = (p: { points: [number, number][] }, end: number) => p.points[end ? p.points.length - 1 : 0]
+  /** Piece ends by cell: piece index × 2, + 1 for its last point. */
   const ends = new Map<string, number[]>()
   pieces.forEach((p, i) => {
-    for (const [end, point] of [[0, p.points[0]], [1, p.points[p.points.length - 1]]] as const) {
-      const k = key(p.colour, point)
+    for (const end of [0, 1]) {
+      const [x, y] = at(p, end)
+      const k = cell(p.colour, Math.round(x / tolerance), Math.round(y / tolerance))
       ;(ends.get(k) ?? ends.set(k, []).get(k)!).push(i * 2 + end)
     }
   })
   const used = new Uint8Array(pieces.length)
-  /** An unused piece of this colour with an end here, and which end. */
-  const meeting = (colour: string, point: [number, number]) => {
-    const end = ends.get(key(colour, point))?.find((e) => !used[e >> 1])
-    if (end !== undefined) used[end >> 1] = 1
-    return end
+  /** The closest unused piece of this colour with an end within tolerance,
+   *  and which end. */
+  const meeting = (colour: string, [x, y]: [number, number]) => {
+    const [cx, cy] = [Math.round(x / tolerance), Math.round(y / tolerance)]
+    let best: number | undefined, bestDistance = tolerance
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      for (const e of ends.get(cell(colour, cx + dx, cy + dy)) ?? []) {
+        if (used[e >> 1]) continue
+        const [ex, ey] = at(pieces[e >> 1], e & 1)
+        const distance = Math.hypot(ex - x, ey - y)
+        if (distance <= bestDistance) [best, bestDistance] = [e, distance]
+      }
+    }
+    if (best !== undefined) used[best >> 1] = 1
+    return best
   }
   const joined: typeof pieces = []
   pieces.forEach(({ colour, points: first }, i) => {
@@ -143,22 +116,6 @@ function join(pieces: { colour: string; points: [number, number][] }[], toleranc
   return joined
 }
 
-/** A line with its corners rounded off (Chaikin's corner cutting, twice),
- *  keeping both ends. */
-function rounded(p: [number, number][]) {
-  for (let pass = 0; pass < 2 && p.length > 2; pass++) {
-    const next: [number, number][] = [p[0]]
-    for (let i = 0; i < p.length - 1; i++) {
-      const [[ax, ay], [bx, by]] = [p[i], p[i + 1]]
-      if (i > 0) next.push([0.75 * ax + 0.25 * bx, 0.75 * ay + 0.25 * by])
-      if (i < p.length - 2) next.push([0.25 * ax + 0.75 * bx, 0.25 * ay + 0.75 * by])
-    }
-    next.push(p[p.length - 1])
-    p = next
-  }
-  return p
-}
-
 /** Google's encoded polyline format (5 decimal places), from flat
  *  lon, lat pairs. */
 function encode(flat: number[]): string {
@@ -177,42 +134,25 @@ function encode(flat: number[]): string {
 }
 
 /** Every step's lines, encoded. */
-// Single lines aren't side by side, so a drawing doesn't depend on the zoom:
-// one is drawn for each set of lines shown (LINES' minZoom) and graph
-// (bands.ts), with the detail of the closest zoom it's shown at
-const shownAt = (zoom: number) => Object.keys(LINES).filter((l) => lineStyle(l).minZoom <= zoom).join('|') + mapFile(bandAt(zoom))
-const drawings: { zoom: number; detail: number; bundled: boolean }[] = []
-for (let zoom = MIN_ZOOM; zoom < BUNDLE_ZOOM; zoom++) {
-  const last = drawings[drawings.length - 1]
-  if (last && shownAt(last.zoom) === shownAt(zoom)) last.detail = zoom
-  else drawings.push({ zoom, detail: zoom, bundled: false })
-}
-for (const [i, drawn] of BUNDLE_DRAWN.entries()) {
-  drawings.push({ zoom: i ? drawn - 1 : BUNDLE_ZOOM, detail: drawn, bundled: true })
-}
-
-const steps: { zoom: number; drawn: number; bundled: boolean; stations: number; lines: string[][] }[] = []
-for (const { zoom, detail, bundled: isBundled } of drawings) {
-  const metresPerPoint = METRES_AT_ZOOM_0 / 2 ** detail
-  // Each from the graph for the zoom it's drawn for: merged further out
-  const band = bandAt(isBundled ? detail : zoom)
-  const pieces = isBundled ? bundled(detail, metresPerPoint, band) : centrelines(zoom, metresPerPoint)
+const steps: { zoom: number; drawn: number; lines: string[][] }[] = []
+for (const [i, drawn] of DRAWN_ZOOMS.entries()) {
+  const zoom = i ? drawn - 1 : MIN_ZOOM
+  const metresPerPoint = METRES_AT_ZOOM_0 / 2 ** drawn
   const toLonLat = (points: [number, number][]) =>
-    (isBundled ? simplify(points, metresPerPoint / 4) : points)
-      .flatMap(([x, y]) => fromMercator(x, y).map((v) => Math.round(v * 1e6) / 1e6))
-  const lines = join(pieces, metresPerPoint / 2).map(({ colour, points }) => [colour, encode(toLonLat(points))])
-  steps.push({ zoom, drawn: isBundled ? detail : WIDTH_ZOOM, bundled: isBundled, stations: BANDS.indexOf(band), lines })
-  console.error(`zoom ${zoom}${detail > zoom ? `–${detail}` : ''}: ${lines.length} lines`)
+    simplify(points, metresPerPoint / 4).flatMap(([x, y]) => fromMercator(x, y).map((v) => Math.round(v * 1e6) / 1e6))
+  const lines = join(drawing(metresPerPoint), metresPerPoint / 2).map(({ colour, points }) => [colour, encode(toLonLat(points))])
+  steps.push({ zoom, drawn, lines })
+  console.error(`zoom ${zoom}+ (drawn for ${drawn}): ${lines.length} lines`)
 }
 
-/** A zoom level's lines drawn side by side by transitmap, in Web Mercator
+/** The lines drawn side by side by transitmap at a scale, in Web Mercator
  *  metres. */
-function bundled(zoom: number, metresPerPoint: number, band: (typeof BANDS)[number]) {
+function drawing(metresPerPoint: number) {
   const svg = spawnSync('vendor/loom/build/transitmap', [
-    '--line-width', String(SLOT_POINTS * metresPerPoint),
+    '--line-width', String(LINE_POINTS * metresPerPoint),
     '--line-spacing', String(GAP_POINTS * metresPerPoint),
     '--outline-width', '0', '--no-render-stations',
-  ], { input: graphAt(zoom, band), maxBuffer: 1 << 30 }).stdout.toString()
+  ], { input: graph, maxBuffer: 1 << 30 }).stdout.toString()
 
   // SVG units to Web Mercator metres, from its bounding box
   const head = /latlng-box="([^"]+)" viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(svg)!
@@ -231,33 +171,10 @@ function bundled(zoom: number, metresPerPoint: number, band: (typeof BANDS)[numb
   return pieces
 }
 
-/** A zoom level's corridors, each as one line along the graph in its most
- *  important line's colour, in Web Mercator metres: simplified further than
- *  bundles, with corners rounded, each between its junctions so lines still
- *  meet there. */
-function centrelines(zoom: number, metresPerPoint: number) {
-  return (JSON.parse(graphAt(zoom).toString()).features as any[])
-    .filter((f) => f.geometry.type === 'LineString')
-    .map((f) => {
-      const line = [...f.properties.lines].sort((a: any, b: any) => priority(a.id) - priority(b.id))[0]
-      return {
-        colour: lineColour(line.id).toLowerCase(),
-        points: rounded(simplify((f.geometry.coordinates as [number, number][]).map(([lon, lat]) => [mercX(lon), mercY(lat)] as [number, number]), metresPerPoint)),
-      }
-    })
-}
-
 writeFileSync('out/gb.transit.json', JSON.stringify({
-  linePoints: DEFAULT_POINTS, pitchPoints: SLOT_POINTS + GAP_POINTS, widths: lineWidths(), darkColours: darkColours(),
-  stationSets: BANDS.map((b) => stationDots(bandGraphs.get(mapFile(b))!)), steps,
+  linePoints: LINE_POINTS, pitchPoints: LINE_POINTS + GAP_POINTS, darkColours: darkColours(),
+  stations: stationDots(graph), steps,
 }))
-
-/** Each line's width in points, by colour, where it isn't the default. */
-function lineWidths() {
-  const features = JSON.parse(bandGraphs.get(mapFile(BANDS[0]))!.toString()).features as any[]
-  const ids = new Set<string>(features.flatMap((f) => (f.geometry.type === 'LineString' ? f.properties.lines.map((l: any) => l.id) : [])))
-  return Object.fromEntries([...ids].filter((id) => lineStyle(id).width !== DEFAULT_POINTS).map((id) => [lineColour(id).toLowerCase(), lineStyle(id).width]))
-}
 
 /** Each line's colour on dark maps, by its colour, where it has one. */
 function darkColours() {
@@ -306,10 +223,8 @@ function stopDots(graph: Buffer) {
     const edge = (edgesAt.get(p.id) ?? []).sort((a, b) => b.properties.lines.length - a.properties.lines.length)[0]
     if (!edge) return []
     const notServing = new Set<string>(p.not_serving ?? [])
-    // Side by side, a dot on each line; otherwise one, as the track's drawn
-    const serving = (edge.properties.lines as any[]).filter((l) => !notServing.has(l.id))
-    const colours = (BUNDLE_DRAWN.length ? serving : [...serving].sort((a, b) => priority(a.id) - priority(b.id)).slice(0, 1))
-      .map((l) => (l.color as string).toLowerCase())
+    // A dot on each line
+    const colours = (edge.properties.lines as any[]).filter((l) => !notServing.has(l.id)).map((l) => (l.color as string).toLowerCase())
     if (!colours.length) return []
     // Its direction (from → to) over the first or last 30 m at the station
     const c = (edge.geometry.coordinates as [number, number][]).map(([lon, lat]) => [mercX(lon), mercY(lat)] as [number, number])
