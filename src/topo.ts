@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs'
 /** How far apart tracks are merged, in topo's units (Web Mercator metres:
  *  about 0.6 m on the ground in Britain): a line's own, then lines'. */
 const LINE_MERGE = 150
-const SHARED_MERGE = 100
+const SHARED_MERGE = 80
 const SMOOTH = 50
 const RESTRICTIONS = ['--turn-restr-full-turn-angle', '60', '--turn-restr-full-turn-pen', '10000']
 
