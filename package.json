@@ -12,7 +12,7 @@
     "prebuild": "[ -x vendor/loom/build/topo ] || npm run loom; [ -f vendor/osm/great-britain-latest.osm.pbf ] || npm run osm",
     "build": "npm run linegraph && npm run topo && npm run tidy && npm run check && npm run render && npm run preview && npm run tracks",
     "linegraph": "mkdir -p out && node src/linegraph.ts vendor/osm/great-britain-latest.osm.pbf out/gb.routes.json out/gb.names.json > out/gb.linegraph.json",
-    "topo": "node src/topo.ts out/gb.linegraph.json > out/gb.topo.json",
+    "topo": "node src/topo.ts out/gb.linegraph.json out/gb.lines.json > out/gb.topo.json",
     "tidy": "node src/tidy.ts out/gb.topo.json out/gb.routes.json out/gb.linegraph.json | vendor/loom/build/loom > out/gb.map.json",
     "check": "node src/check.ts out/gb.routes.json out/gb.linegraph.json out/gb.map.json",
     "render": "node src/render.ts",

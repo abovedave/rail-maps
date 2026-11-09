@@ -1,11 +1,12 @@
 // Shows Britain's transit map on Apple Maps with MapKit JS, from
 // out/gb.transit.json (see src/render.ts), the same way the app does.
 //
-// The lines are drawn ahead of time (src/render.ts), side by side by LOOM's
-// transitmap, one drawing for each whole zoom.
-//
-// Lines widen and narrow as Apple's roads do. Stations are a dot on each line
-// calling there, in its colour, or one white dot zoomed out.
+// The lines are drawn ahead of time (src/render.ts): zoomed out, an overview
+// of each line on its own track, widening and narrowing as Apple's roads do;
+// zoomed in, side by side by LOOM's transitmap, a drawing for every other
+// zoom, widening and narrowing with their spacing (see scaleAt). Stations
+// are a dot on each line calling there, in its colour, or one white dot
+// zoomed out.
 
 const status = document.getElementById('status')
 
@@ -82,9 +83,17 @@ const lineStyle = (colour, width) => new mapkit.Style({
 /** Which step to show for a zoom level: the last starting at or before it,
  *  to the nearest whole zoom. */
 const stepIndex = (z) => Math.max(0, transit.steps.findLastIndex((s) => s.zoom <= z + 0.5))
-/** How much wider than drawn to show a step's lines at a zoom: as roads
- *  widen and narrow from the zoom it's drawn for, no thinner than half. */
-const scaleAt = (z, index) => Math.max(0.5, roadAt(z) / roadAt(transit.steps[index].drawn))
+/** How much wider than drawn to show a step's lines at a zoom. The
+ *  overview's widen and narrow as roads do, no thinner than half. Side by
+ *  side, lines keep to two thirds of their spacing, which doubles each
+ *  level in, from 0.2 to 3 points wide: in quarter levels, so overlays
+ *  aren't restyled every frame. */
+function scaleAt(z, index) {
+  const { drawn, overview } = transit.steps[index]
+  if (overview) return Math.max(0.5, roadAt(z) / roadAt(drawn))
+  const scale = 2 ** (Math.round((z - drawn) * 4) / 4)
+  return Math.min(3, Math.max(0.2, transit.linePoints * scale)) / transit.linePoints
+}
 
 /** Each step's line overlays, made when first shown. */
 const overlays = new Map()

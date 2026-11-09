@@ -13,8 +13,8 @@
 // as a Google encoded polyline, and the station dots (see stationDots):
 // { linePoints, pitchPoints, darkColours: { colour: colour },
 // stations: [[name, lon, lat, angle, colour, …]], steps: [{ zoom, drawn: the
-// zoom it's drawn for, lines: [[colour, polyline]], labels: line names (see
-// labels.ts), [[name, positions as a polyline, angles as encoded whole degrees
+// zoom it's drawn for, overview: true for the overview, lines: [[colour,
+// polyline]], labels: line names (see labels.ts), [[name, positions as a polyline, angles as encoded whole degrees
 // clockwise from east]] }], labelNames: [[text, colour]] (labels' `name`
 // indexes it), labelPoints: their text size }. A step is shown
 // from its zoom until the next step's (to the nearest whole zoom).
@@ -23,6 +23,7 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { encode, encodeIntegers, fromMercator, mercX, mercY, METRES_AT_ZOOM_0, simplify } from './geo.ts'
 import { LABEL_POINTS, nameIndex, placeLabels } from './labels.ts'
+import { LINES } from './lines.ts'
 import { darkColours, stationDots } from './stations.ts'
 import type { LatLon } from './osm.ts'
 
@@ -32,21 +33,32 @@ const LINE_POINTS = 2
 const GAP_POINTS = 1
 /** The furthest out the map is drawn. */
 const MIN_ZOOM = 5
-/** Each whole zoom from MIN_DRAWN_ZOOM to MAX_DRAWN_ZOOM gets a drawing
- *  of its own, shown within half a level of it, so lines are always close
- *  to their set spacing: it's fixed on the ground, so a drawing's lines are
- *  twice as far apart a level in, and half a level out of their own. The
- *  first is also shown from MIN_ZOOM, where lines sharing track are close
- *  enough together to show as one: drawn for their own zoom, they'd be
- *  kilometres apart. */
-const MIN_DRAWN_ZOOM = 9
-const MAX_DRAWN_ZOOM = 18
-/** Each step's first zoom and the zoom it's drawn for. Maps widen and
- *  narrow lines within a step, and simplify them further out. */
+/** Zoomed in, lines sharing track are drawn side by side, by transitmap,
+ *  a drawing for every other zoom (SIDE_BY_SIDE), each shown from a level
+ *  before it to half a level after. Spacing is fixed on the ground, so a
+ *  drawing's lines are twice as far apart a level in, and half a level out
+ *  of their own: maps widen and narrow lines with it, keeping them two
+ *  thirds of the spacing, from 0.2 to 3 points (`overview` unset, see
+ *  web/map.js).
+ *  Further out, from MIN_ZOOM, the map is an overview instead: each line on
+ *  its own track, over each other where they share it (see overview). Side
+ *  by side there, lines crowd: drawn for their own zoom they'd be hundreds
+ *  of metres apart, knotting London's termini into one bundle, and squeezed
+ *  closer their colours blur. Nor is anything moved off its track, as tidy
+ *  moves lines to draw them side by side. Maps widen and narrow its lines
+ *  as Apple's roads do. */
+const SIDE_BY_SIDE = [14, 16, 18]
+/** Each step's first zoom, the zoom it's drawn for, and whether it's the
+ *  overview. The overview is drawn twice: simply further out, and in more
+ *  detail, with line names, from LABELS_ZOOM. */
 const STEPS = [
-  { zoom: MIN_ZOOM, drawn: MIN_DRAWN_ZOOM },
-  ...Array.from({ length: MAX_DRAWN_ZOOM - MIN_DRAWN_ZOOM }, (_, i) => ({ zoom: MIN_DRAWN_ZOOM + 1 + i, drawn: MIN_DRAWN_ZOOM + 1 + i })),
+  { zoom: MIN_ZOOM, drawn: 10, overview: true },
+  { zoom: 11, drawn: 12, overview: true },
+  ...SIDE_BY_SIDE.map((drawn) => ({ zoom: drawn - 1, drawn, overview: false })),
 ]
+/** The overview's drawing order, last on top: National Rail at the bottom,
+ *  then each network known by name, the first in LINES on top. */
+const OVERVIEW_ORDER = [...Object.keys(LINES).filter((line) => line !== 'National Rail'), 'National Rail']
 
 const graph = readFileSync('out/gb.map.json')
 
@@ -104,7 +116,7 @@ function join(pieces: { colour: string; points: [number, number][] }[], toleranc
 }
 
 /** Every step's lines, encoded. */
-/** Lines are named (labels.ts) in drawings for this zoom and closer. */
+/** Lines are named (labels.ts) in steps shown from this zoom and closer. */
 const LABELS_ZOOM = 11
 
 const stations = stationDots(graph)
@@ -129,17 +141,36 @@ function encodeLabels(labels: (string | number)[][]) {
   return [...byName].map(([i, { points, angles }]) => [i, encode(points), encodeIntegers(angles)])
 }
 
-const steps: { zoom: number; drawn: number; lines: string[][]; labels: (string | number)[][] }[] = []
-for (const { zoom, drawn } of STEPS) {
+/** The overview's lines, for each step drawn as the overview. */
+const overviewPieces = overview()
+const steps: { zoom: number; drawn: number; overview?: true; lines: string[][]; labels: (string | number)[][] }[] = []
+for (const { zoom, drawn, overview: isOverview } of STEPS) {
   const metresPerPoint = METRES_AT_ZOOM_0 / 2 ** drawn
   const round = (v: number) => Math.round(v * 1e6) / 1e6
   const toLatLon = (points: [number, number][]) =>
     simplify(points, metresPerPoint / 4).map(([x, y]): LatLon => { const [lon, lat] = fromMercator(x, y); return [round(lat), round(lon)] })
-  const joined = join(drawing(metresPerPoint), metresPerPoint / 2)
+  const joined = join(isOverview ? overviewPieces : drawing(metresPerPoint), metresPerPoint / 2)
   const lines = joined.map(({ colour, points }) => [colour, encode(toLatLon(points))])
-  const labels = drawn >= LABELS_ZOOM ? placeLabels(joined, metresPerPoint, stationPoints, nameAt, fromMercator) : []
-  steps.push({ zoom, drawn, lines, labels: encodeLabels(labels) })
+  const labels = zoom >= LABELS_ZOOM ? placeLabels(joined, metresPerPoint, stationPoints, nameAt, fromMercator) : []
+  steps.push({ zoom, drawn, ...(isOverview && { overview: true as const }), lines, labels: encodeLabels(labels) })
   console.error(`zoom ${zoom}+ (drawn for ${drawn}): ${lines.length} lines, ${labels.length} names`)
+}
+
+/** Each line on its own track, in Web Mercator metres: its tracks merged
+ *  into one centreline on their own (lines.json, from topo's first pass),
+ *  before lines merge with each other or tidy moves anything. Lines on
+ *  track they share are drawn over each other rather than side by side,
+ *  National Rail first and each named network over it (OVERVIEW_ORDER), so
+ *  nothing is moved off its track. */
+function overview() {
+  const rank = (line: string) => { const i = OVERVIEW_ORDER.indexOf(line); return i < 0 ? OVERVIEW_ORDER.length : i }
+  const pieces: { colour: string; points: [number, number][]; rank: number }[] = []
+  for (const { geometry, properties } of JSON.parse(readFileSync('out/gb.lines.json', 'utf8')).features) {
+    if (geometry.type !== 'LineString') continue
+    const points = geometry.coordinates.map(([lon, lat]: number[]): [number, number] => [mercX(lon), mercY(lat)])
+    for (const line of properties.lines ?? []) pieces.push({ colour: line.color.toLowerCase(), points, rank: rank(line.id) })
+  }
+  return pieces.sort((a, b) => b.rank - a.rank)
 }
 
 /** The lines drawn side by side by transitmap at a scale, in Web Mercator

@@ -29,10 +29,10 @@ also its own script (`npm run linegraph`, `topo`, `tidy`, `render`,
 |---|---|---|
 | 1. Download | `npm run osm`: Geofabrik's Great Britain extract | `vendor/osm/great-britain-latest.osm.pbf` |
 | 2. Line graph | `src/linegraph.ts`: every `route=train` relation, via osmium | `out/gb.linegraph.json`, `out/gb.routes.json` |
-| 3. Merge | `src/topo.ts`, with LOOM `topo`: each line's parallel tracks up to about 95 m apart become one smoothed corridor (about 30 m), then lines merge where they share track (about 50 m), so lines on different tracks nearby (the Elizabeth line under Whitechapel) stay apart | `out/gb.topo.json` |
+| 3. Merge | `src/topo.ts`, with LOOM `topo`: each line's parallel tracks up to about 95 m apart become one smoothed corridor (about 30 m), then lines merge where they share track (about 50 m), so lines on different tracks nearby (the Elizabeth line under Whitechapel) stay apart | `out/gb.topo.json`, and the first pass in `out/gb.lines.json` |
 | 4. Tidy and order | `src/tidy.ts` simplifies knots `topo` leaves (junctions under 200 m apart become one, short parallel ways one, station-free bypasses within 500 m of a route carrying the same lines are dropped, such as the Redhill avoiding line, a station's platforms linked by under 400 m of track become one, and turn restrictions the services show are wrong are lifted), then LOOM `loom` orders the lines on each corridor | `out/gb.map.json` |
 | Check | `src/check.ts` (`npm run check`): every service in `out/gb.routes.json` (written by step 2) still runs unbroken from stop to stop on the finished graph; lists any breaks, by line | the build log |
-| 5. Draw | `src/render.ts`: LOOM `transitmap` draws lines side by side, for each whole zoom from 9 to 18 | `out/gb.transit.json` |
+| 5. Draw | `src/render.ts`: LOOM `transitmap` draws lines side by side for zooms 14, 16 and 18, and an overview further out | `out/gb.transit.json` |
 | 6. Show | `web/map.js` with MapKit JS, or the app | the map |
 | Track graph | `src/tracks.ts`: all running track, split at junctions and the app's stations, for routing trains along real track | `out/gb.tracks.json` |
 
@@ -52,17 +52,23 @@ no known company are drawn as National Rail if tagged `network` or
 otherwise (heritage railways, mistagged track) left out and listed by the
 build.
 
-**Drawing.** Lines sharing track are drawn side by side with LOOM's
-`transitmap`, 2 pt wide with 1 pt between, for each whole zoom from 9 to
-18, each shown within half a level of its zoom (zoom 9's from zoom 5, where
-lines sharing track show as one): `STEPS` in `src/render.ts`. Spacing is
-fixed on the ground, so a drawing's lines spread apart as you zoom in;
-drawing every level keeps them within half a level of their set spacing.
-The web preview takes `?lat=…&lon=…&z=…` to start at a place.
+**Drawing.** Zoomed out (zoom 5 to 12) the map is an overview: each line on
+its own track, its parallel tracks merged into one centreline by topo's
+first pass (`out/gb.lines.json`), before lines merge with each other or tidy
+moves anything, drawn over each other where they share track (named networks
+over National Rail). Side by side there, lines would knot London's termini
+into a bundle and blur colours. Its lines widen and narrow as Apple's roads
+do (`MKRoadWidthAtZoomScale` in the app, the same widths in `web/map.js`).
 
-Maps widen and narrow lines as Apple's roads do (`MKRoadWidthAtZoomScale` in
-the app, the same widths in `web/map.js`), and spread station dots with the
-lines. `out/gb.svg` is a preview of the whole network.
+Zoomed in, lines sharing track are drawn side by side with LOOM's
+`transitmap`, 2 pt wide with 1 pt between, for zooms 14, 16 and 18, each
+shown from a level before to half a level after: `STEPS` in `src/render.ts`.
+Spacing is fixed on the ground, so a drawing's lines spread apart as you
+zoom in; maps keep lines two thirds of their spacing wide, from 0.2 to 3 pt
+(`scaleAt` in `web/map.js`), and spread station dots with them.
+
+The web preview takes `?lat=…&lon=…&z=…` to start at a place. `out/gb.svg`
+is a preview of the whole network.
 
 ## Updating the app
 

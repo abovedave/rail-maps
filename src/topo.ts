@@ -2,7 +2,10 @@
 // track on its own, then all the lines together, only where they're close
 // enough to share track.
 //
-//   node src/topo.ts linegraph.json > topo.json
+//   node src/topo.ts linegraph.json [lines.json] > topo.json
+//
+// With lines.json, also writes the first pass, each line merged on its own,
+// for render.ts's overview: one centreline per line, before lines merge.
 //
 // In one pass, topo merges any lines closer than its distance, even on
 // different tracks: the Elizabeth line under Whitechapel was pulled onto the
@@ -12,7 +15,7 @@
 // metres apart.
 
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 
 /** How far apart tracks are merged, in topo's units (Web Mercator metres:
  *  about 0.6 m on the ground in Britain): a line's own, then lines'. */
@@ -53,6 +56,8 @@ const merged = lines.flatMap((line, i) => {
     ? { ...f, properties: { ...f.properties, id: id(f.properties.id), excluded_conn: f.properties.excluded_conn?.map((c: any) => ({ ...c, node_from: id(c.node_from), node_to: id(c.node_to) })) } }
     : { ...f, properties: { ...f.properties, from: id(f.properties.from), to: id(f.properties.to) } })
 })
+
+if (process.argv[3]) writeFileSync(process.argv[3], JSON.stringify({ type: 'FeatureCollection', features: merged.filter((f: any) => f.geometry.type === 'LineString') }))
 
 // Then the lines together, where they share track
 const started = Date.now()
