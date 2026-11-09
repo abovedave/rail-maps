@@ -1,7 +1,15 @@
 // Writes a LOOM line graph (GeoJSON) of Britain's train services from an
 // OpenStreetMap extract.
 //
-//   node src/linegraph.ts <extract.osm.pbf> > linegraph.json
+//   node src/linegraph.ts <extract.osm.pbf> [routes.json [names.json]] > linegraph.json
+//
+// With routes.json, also writes each service's stops in order, for check.ts
+// to see that the finished map still runs each service from stop to stop:
+// [{ name, line, stops: [node ids] }]. With names.json, also writes what
+// each line is called along each stretch of its track, for render.ts to
+// label it: [[line, name, [[lon, lat], …]]]. National Rail is called by its
+// track's name (West Coast Main Line), the Overground by each of its lines'
+// (Windrush line), and other lines by their own.
 //
 // Each `route=train` relation is one service (and the Tyne and Wear Metro's
 // `route=light_rail` ones). Services are grouped into lines (see lines.ts):
@@ -14,12 +22,14 @@
 //
 // Needs osmium (`brew install osmium-tool`).
 
+import { writeFileSync } from 'node:fs'
+import { simplifyLatLon } from './geo.ts'
 import { lineColour, routeLine } from './lines.ts'
 import { filtered, inNorthernIreland, type LatLon } from './osm.ts'
 
 const pbf = process.argv[2]
 if (!pbf) {
-  console.error('Usage: node src/linegraph.ts <extract.osm.pbf>')
+  console.error('Usage: node src/linegraph.ts <extract.osm.pbf> [routes.json]')
   process.exit(1)
 }
 
@@ -59,7 +69,13 @@ const stopNodes = new Set<number>()
 const trackStops = new Set<number>()
 /** The lines on each stretch of track between neighbouring nodes. */
 const segmentLines = new Map<string, Set<string>>()
+/** Track ways' names, and the Overground lines (their routes' `ref`, such as
+ *  Windrush) on each stretch, for names.json. */
+const wayNames = new Map<number, string>()
+const segmentRefs = new Map<string, Map<string, number>>()
 const segment = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`)
+/** Each service, its line and stops in order, for check.ts. */
+const routes: { name: string; line: string; stops: number[] }[] = []
 
 /** The part of a way a train uses. Routes list whole OSM ways, but a way
  *  often runs on past the junction where the train joins or leaves it, so
@@ -82,7 +98,10 @@ for await (const { type, id, tags, at, nodes, members } of filtered(pbf, ['r/rou
     if (tags.name) names.set(id, tags.name)
     if (tags.name && (['stop', 'station', 'halt'].includes(tags.railway) || tags.public_transport === 'stop_position') && tags.train !== 'no' && tags.usage !== 'tourism') trackStops.add(id)
   } else if (type === 'w') {
-    if (isTrack(tags) && nodes!.length) wayNodes.set(id, nodes!.filter((n) => coords.has(n)))
+    if (isTrack(tags) && nodes!.length) {
+      wayNodes.set(id, nodes!.filter((n) => coords.has(n)))
+      if (tags.name) wayNames.set(id, tags.name)
+    }
   } else {
     const service = serviceLine(tags)
     if (!service) continue
@@ -93,11 +112,16 @@ for await (const { type, id, tags, at, nodes, members } of filtered(pbf, ['r/rou
       if (member.type === 'n' && member.role.startsWith('stop')) { stopNodes.add(member.id); stops.add(member.id) }
     }
     if (!stops.size) for (const n of ways.flat()) if (trackStops.has(n)) { stopNodes.add(n); stops.add(n) }
+    routes.push({ name: tags.name || `r${id}`, line: service, stops: [...stops] })
     ways.forEach((nodes, i) => {
       const used = usedPart(nodes, ways[i - 1], ways[i + 1], stops)
       for (let j = 1; j < used.length; j++) {
         const key = segment(used[j - 1], used[j])
         segmentLines.get(key)?.add(service) ?? segmentLines.set(key, new Set([service]))
+        if (service === 'London Overground' && tags.ref) {
+          const refs = segmentRefs.get(key) ?? segmentRefs.set(key, new Map()).get(key)!
+          refs.set(tags.ref, (refs.get(tags.ref) ?? 0) + 1)
+        }
       }
     })
   }
@@ -118,9 +142,28 @@ const linesOf = (a: number, b: number) => [...(segmentLines.get(segment(a, b)) ?
 const drawn = new Set<string>()
 let edgeId = 0
 
-function addEdge(piece: number[]) {
+/** What each line is called along stretches of track, for names.json. */
+const lineNames: [string, string, LatLon[]][] = []
+/** What a line is called along a piece of track on a way. */
+function lineName(line: string, way: number, piece: number[]): string | undefined {
+  if (line === 'National Rail') return wayNames.get(way)
+  if (line === 'London Overground') {
+    // Whichever of its lines most services here are
+    const counts = new Map<string, number>()
+    for (let i = 1; i < piece.length; i++) for (const [ref, n] of segmentRefs.get(segment(piece[i - 1], piece[i])) ?? []) counts.set(ref, (counts.get(ref) ?? 0) + n)
+    const ref = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0]
+    return ref ? `${ref} line` : 'London Overground'
+  }
+  return line
+}
+
+function addEdge(piece: number[], way: number) {
   const lines = linesOf(piece[0], piece[1]).split('|')
   if (inNorthernIreland(coords.get(piece[0])!)) return
+  for (const line of lines) {
+    const name = lineName(line, way, piece)
+    if (name) lineNames.push([line, name, simplifyLatLon(piece.map((n) => coords.get(n)!), 20)])
+  }
   usedNodes.add(piece[0]).add(piece[piece.length - 1])
   features.push({
     type: 'Feature',
@@ -135,26 +178,26 @@ function addEdge(piece: number[]) {
 }
 
 // Edges follow the ways, split at junctions, stops and where lines change
-for (const nodes of wayNodes.values()) {
+for (const [way, nodes] of wayNodes) {
   let piece: number[] = []
   for (let i = 1; i < nodes.length; i++) {
     const [a, b] = [nodes[i - 1], nodes[i]]
     const key = segment(a, b)
     if (!segmentLines.has(key) || drawn.has(key)) {
-      if (piece.length > 1) addEdge(piece)
+      if (piece.length > 1) addEdge(piece, way)
       piece = []
       continue
     }
     drawn.add(key)
     const before = piece[piece.length - 2]
     if (piece.length > 1 && (splitsAt(a) || linesOf(before, a) !== linesOf(a, b))) {
-      addEdge(piece)
+      addEdge(piece, way)
       piece = []
     }
     if (!piece.length) piece.push(a)
     piece.push(b)
   }
-  if (piece.length > 1) addEdge(piece)
+  if (piece.length > 1) addEdge(piece, way)
 }
 // Each stop is its own station to topo: it merges stations with the same id,
 // and runs every line calling there through one point, which pulls lines off
@@ -175,3 +218,12 @@ if (unknown.size) console.error(`Left out routes of unknown companies: ${[...unk
 const lineCount = new Set([...segmentLines.values()].flatMap((l) => [...l])).size
 console.error(`${edgeId} edges, ${usedNodes.size} nodes, ${lineCount} lines, ${[...usedNodes].filter((n) => stopNodes.has(n)).length} stops`)
 process.stdout.write(JSON.stringify({ type: 'FeatureCollection', features }))
+// Only stops on the graph: a route's stops on track that isn't (Northern
+// Ireland, ways left out) can't be checked
+if (process.argv[3]) {
+  writeFileSync(process.argv[3], JSON.stringify(routes.map((r) => ({ ...r, stops: r.stops.filter((n) => usedNodes.has(n)).map((n) => `n${n}`) }))))
+}
+if (process.argv[4]) {
+  const round = (v: number) => Math.round(v * 1e5) / 1e5
+  writeFileSync(process.argv[4], JSON.stringify(lineNames.map(([line, name, path]) => [line, name, path.map(([lat, lon]) => [round(lon), round(lat)])])))
+}

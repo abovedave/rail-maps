@@ -13,13 +13,17 @@
 // as a Google encoded polyline, and the station dots (see stationDots):
 // { linePoints, pitchPoints, darkColours: { colour: colour },
 // stations: [[name, lon, lat, angle, colour, …]], steps: [{ zoom, drawn: the
-// zoom it's drawn for, lines: [[colour, polyline]] }] }. A step is shown
+// zoom it's drawn for, lines: [[colour, polyline]], labels: line names (see
+// labels.ts), [[name, positions as a polyline, angles as encoded whole degrees
+// clockwise from east]] }], labelNames: [[text, colour]] (labels' `name`
+// indexes it), labelPoints: their text size }. A step is shown
 // from its zoom until the next step's (to the nearest whole zoom).
 
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { encode, simplify } from './geo.ts'
-import { LINES } from './lines.ts'
+import { encode, encodeIntegers, fromMercator, mercX, mercY, METRES_AT_ZOOM_0, simplify } from './geo.ts'
+import { LABEL_POINTS, nameIndex, placeLabels } from './labels.ts'
+import { darkColours, stationDots } from './stations.ts'
 import type { LatLon } from './osm.ts'
 
 /** Lines' width, and the space between them, in screen points at the zoom
@@ -43,16 +47,8 @@ const STEPS = [
   { zoom: MIN_ZOOM, drawn: MIN_DRAWN_ZOOM },
   ...Array.from({ length: MAX_DRAWN_ZOOM - MIN_DRAWN_ZOOM }, (_, i) => ({ zoom: MIN_DRAWN_ZOOM + 1 + i, drawn: MIN_DRAWN_ZOOM + 1 + i })),
 ]
-/** Web Mercator metres per screen point at zoom 0. */
-const METRES_AT_ZOOM_0 = 156_543.034
 
 const graph = readFileSync('out/gb.map.json')
-
-const R = 6_378_137
-const fromMercator = (x: number, y: number): [number, number] =>
-  [(x / R) * (180 / Math.PI), (Math.atan(Math.exp(y / R)) * 360) / Math.PI - 90]
-const mercX = (lon: number) => (lon * Math.PI * R) / 180
-const mercY = (lat: number) => R * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360))
 
 /** Joins pieces of one colour whose ends meet (within `tolerance`, either
  *  way round) into longer lines, so maps have far fewer lines to draw:
@@ -108,15 +104,42 @@ function join(pieces: { colour: string; points: [number, number][] }[], toleranc
 }
 
 /** Every step's lines, encoded. */
-const steps: { zoom: number; drawn: number; lines: string[][] }[] = []
+/** Lines are named (labels.ts) in drawings for this zoom and closer. */
+const LABELS_ZOOM = 11
+
+const stations = stationDots(graph)
+const stationPoints = stations.map((s): [number, number] => [mercX(s[1]), mercY(s[2])])
+const nameAt = nameIndex(JSON.parse(readFileSync('out/gb.names.json', 'utf8')), ([lon, lat]) => [mercX(lon), mercY(lat)])
+
+/** Every line name used, [text, colour], for steps' labels to refer to. */
+const labelNames: [string, string][] = []
+const labelIndex = new Map<string, number>()
+/** A step's names, as [name index, positions as an encoded polyline, angles
+ *  as encoded whole degrees], one entry per name. */
+function encodeLabels(labels: (string | number)[][]) {
+  const byName = new Map<number, { points: LatLon[]; angles: number[] }>()
+  for (const [text, colour, lon, lat, angle] of labels) {
+    const key = `${text}|${colour}`
+    if (!labelIndex.has(key)) { labelIndex.set(key, labelNames.length); labelNames.push([text as string, colour as string]) }
+    const i = labelIndex.get(key)!
+    const entry = byName.get(i) ?? byName.set(i, { points: [], angles: [] }).get(i)!
+    entry.points.push([lat as number, lon as number])
+    entry.angles.push(angle as number)
+  }
+  return [...byName].map(([i, { points, angles }]) => [i, encode(points), encodeIntegers(angles)])
+}
+
+const steps: { zoom: number; drawn: number; lines: string[][]; labels: (string | number)[][] }[] = []
 for (const { zoom, drawn } of STEPS) {
   const metresPerPoint = METRES_AT_ZOOM_0 / 2 ** drawn
   const round = (v: number) => Math.round(v * 1e6) / 1e6
   const toLatLon = (points: [number, number][]) =>
     simplify(points, metresPerPoint / 4).map(([x, y]): LatLon => { const [lon, lat] = fromMercator(x, y); return [round(lat), round(lon)] })
-  const lines = join(drawing(metresPerPoint), metresPerPoint / 2).map(({ colour, points }) => [colour, encode(toLatLon(points))])
-  steps.push({ zoom, drawn, lines })
-  console.error(`zoom ${zoom}+ (drawn for ${drawn}): ${lines.length} lines`)
+  const joined = join(drawing(metresPerPoint), metresPerPoint / 2)
+  const lines = joined.map(({ colour, points }) => [colour, encode(toLatLon(points))])
+  const labels = drawn >= LABELS_ZOOM ? placeLabels(joined, metresPerPoint, stationPoints, nameAt, fromMercator) : []
+  steps.push({ zoom, drawn, lines, labels: encodeLabels(labels) })
+  console.error(`zoom ${zoom}+ (drawn for ${drawn}): ${lines.length} lines, ${labels.length} names`)
 }
 
 /** The lines drawn side by side by transitmap at a scale, in Web Mercator
@@ -146,72 +169,6 @@ function drawing(metresPerPoint: number) {
 }
 
 writeFileSync('out/gb.transit.json', JSON.stringify({
-  linePoints: LINE_POINTS, pitchPoints: LINE_POINTS + GAP_POINTS, darkColours: darkColours(),
-  stations: stationDots(graph), steps,
+  linePoints: LINE_POINTS, pitchPoints: LINE_POINTS + GAP_POINTS, labelPoints: LABEL_POINTS, labelNames, darkColours: darkColours(),
+  stations, steps,
 }))
-
-/** Each line's colour on dark maps, by its colour, where it has one. */
-function darkColours() {
-  return Object.fromEntries(Object.values(LINES).filter((s) => s.dark).map((s) => [s.colour.toLowerCase(), s.dark!.toLowerCase()]))
-}
-
-/** Each station's dots, one on each line calling there, for apps to draw
- *  across the lines in screen points: [name, lon, lat, angle, colour, …].
- *  The angle is the corridor's direction at the station, in degrees
- *  clockwise from east on a north-up map, and the colours run from its
- *  right to its left, LOOM's order, so the first colour's line is drawn
- *  furthest right looking along it. Lines are pitchPoints apart (centre to
- *  centre), centred on the station. */
-function stationDots(graph: Buffer) {
-  return grouped(stopDots(graph))
-}
-
-/** Stops grouped into stations: each OSM stop is its own station in the
- *  graph (see linegraph.ts), so of stops with the same name close together,
- *  only those showing a line no other does are kept, the one with the most
- *  lines first. Where a station's lines share platforms that's one set of
- *  dots; where they're apart (Whitechapel), each line's are on it. */
-function grouped(stops: any[][]) {
-  const kept: any[][] = []
-  for (const stop of [...stops].sort((a, b) => b.length - a.length)) {
-    const [name, lon, lat] = stop
-    const covered = kept.some((k) => k[0] === name
-      && Math.hypot((k[1] - lon) * 69_400, (k[2] - lat) * 111_320) < 500
-      && stop.slice(4).every((c: string) => k.slice(4).includes(c)))
-    if (!covered) kept.push(stop)
-  }
-  return kept
-}
-
-/** Each stop's dots. */
-function stopDots(graph: Buffer) {
-  const features = JSON.parse(graph.toString()).features as any[]
-  const edgesAt = new Map<string, any[]>()
-  for (const f of features) {
-    if (f.geometry.type !== 'LineString') continue
-    for (const n of [f.properties.from, f.properties.to]) (edgesAt.get(n) ?? edgesAt.set(n, []).get(n)!).push(f)
-  }
-  return features.filter((f) => f.geometry.type === 'Point' && f.properties.station_label).flatMap((f) => {
-    const p = f.properties
-    // The corridor with the most lines calling at the station (others may
-    // pass through without calling: the Elizabeth line at Moorgate)
-    const notServing = new Set<string>(p.not_serving ?? [])
-    const calling = (e: any) => e.properties.lines.filter((l: any) => !notServing.has(l.id)).length
-    const edge = (edgesAt.get(p.id) ?? []).sort((a, b) => calling(b) - calling(a) || b.properties.lines.length - a.properties.lines.length)[0]
-    if (!edge) return []
-    // A dot on each line
-    const colours = (edge.properties.lines as any[]).filter((l) => !notServing.has(l.id)).map((l) => (l.color as string).toLowerCase())
-    if (!colours.length) return []
-    // Its direction (from → to) over the first or last 30 m at the station
-    const c = (edge.geometry.coordinates as [number, number][]).map(([lon, lat]) => [mercX(lon), mercY(lat)] as [number, number])
-    const atStart = edge.properties.from === p.id
-    const path = atStart ? c : [...c].reverse()
-    let i = 1
-    while (i < path.length - 1 && Math.hypot(path[i][0] - path[0][0], path[i][1] - path[0][1]) < 30) i++
-    let [dx, dy] = [path[i][0] - path[0][0], path[i][1] - path[0][1]]
-    if (!atStart) [dx, dy] = [-dx, -dy]
-    const angle = Math.round((-Math.atan2(dy, dx) * 180) / Math.PI * 10) / 10
-    const [lon, lat] = f.geometry.coordinates
-    return [[p.station_label, Math.round(lon * 1e6) / 1e6, Math.round(lat * 1e6) / 1e6, angle, ...colours]]
-  })
-}

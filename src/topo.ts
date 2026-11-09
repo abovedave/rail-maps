@@ -29,7 +29,13 @@ const topo = (graph: object, args: string[]) => {
 
 const graph = JSON.parse(readFileSync(process.argv[2], 'utf8'))
 const edges = graph.features.filter((f: any) => f.geometry.type === 'LineString')
-const nodes = new Map<string, any>(graph.features.filter((f: any) => f.geometry.type === 'Point').map((f: any) => [f.properties.id, f]))
+// topo treats stations with the same name as one, and drops track between
+// them where they're apart: the Abbey Line's stop at Watford Junction, 120 m
+// from the main line's, lost its track to Watford North. So each stop's name
+// is made its own while topo runs (`name|id`), and put back after
+const unique = (f: any) => (f.properties.station_label ? { ...f, properties: { ...f.properties, station_label: `${f.properties.station_label}|${f.properties.id}` } } : f)
+const restore = (f: any) => (f.properties.station_label ? { ...f, properties: { ...f.properties, station_label: f.properties.station_label.replace(/\|[^|]*$/, '') } } : f)
+const nodes = new Map<string, any>(graph.features.filter((f: any) => f.geometry.type === 'Point').map((f: any) => [f.properties.id, unique(f)]))
 const lines = [...new Set<string>(edges.flatMap((e: any) => e.properties.lines.map((l: any) => l.id)))]
 
 // Each line merged on its own, with node ids kept apart between lines
@@ -52,4 +58,4 @@ const merged = lines.flatMap((line, i) => {
 const started = Date.now()
 const result = topo({ type: 'FeatureCollection', features: merged }, ['-d', String(SHARED_MERGE), '--smooth', String(SMOOTH)])
 console.error(`  together: ${result.features.filter((f: any) => f.geometry.type === 'LineString').length} edges, ${Math.round((Date.now() - started) / 1000)}s`)
-process.stdout.write(JSON.stringify(result))
+process.stdout.write(JSON.stringify({ ...result, features: result.features.map(restore) }))

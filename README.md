@@ -21,16 +21,17 @@ downloads the extract into `vendor/osm`, or a newer one if Geofabrik has it
 
 ## Pipeline
 
-`npm run build` runs steps 2 to 5 in turn, then the track graph; each is
+`npm run build` runs steps 2 to 5 in turn (with the check after 4), then the track graph; each is
 also its own script (`npm run linegraph`, `topo`, `tidy`, `render`,
 `tracks`), to re-run from any step.
 
 | Step | Tool | Output |
 |---|---|---|
 | 1. Download | `npm run osm`: Geofabrik's Great Britain extract | `vendor/osm/great-britain-latest.osm.pbf` |
-| 2. Line graph | `src/linegraph.ts`: every `route=train` relation, via osmium | `out/gb.linegraph.json` |
+| 2. Line graph | `src/linegraph.ts`: every `route=train` relation, via osmium | `out/gb.linegraph.json`, `out/gb.routes.json` |
 | 3. Merge | `src/topo.ts`, with LOOM `topo`: each line's parallel tracks up to about 95 m apart become one smoothed corridor (about 30 m), then lines merge where they share track (about 50 m), so lines on different tracks nearby (the Elizabeth line under Whitechapel) stay apart | `out/gb.topo.json` |
-| 4. Tidy and order | `src/tidy.ts` simplifies knots `topo` leaves (junctions under 200 m apart become one, short parallel ways one), then LOOM `loom` orders the lines on each corridor | `out/gb.map.json` |
+| 4. Tidy and order | `src/tidy.ts` simplifies knots `topo` leaves (junctions under 200 m apart become one, short parallel ways one, station-free bypasses within 500 m of a route carrying the same lines are dropped, such as the Redhill avoiding line, a station's platforms linked by under 400 m of track become one, and turn restrictions the services show are wrong are lifted), then LOOM `loom` orders the lines on each corridor | `out/gb.map.json` |
+| Check | `src/check.ts` (`npm run check`): every service in `out/gb.routes.json` (written by step 2) still runs unbroken from stop to stop on the finished graph; lists any breaks, by line | the build log |
 | 5. Draw | `src/render.ts`: LOOM `transitmap` draws lines side by side, for each whole zoom from 9 to 18 | `out/gb.transit.json` |
 | 6. Show | `web/map.js` with MapKit JS, or the app | the map |
 | Track graph | `src/tracks.ts`: all running track, split at junctions and the app's stations, for routing trains along real track | `out/gb.tracks.json` |
@@ -57,6 +58,8 @@ build.
 lines sharing track show as one): `STEPS` in `src/render.ts`. Spacing is
 fixed on the ground, so a drawing's lines spread apart as you zoom in;
 drawing every level keeps them within half a level of their set spacing.
+The web preview takes `?lat=…&lon=…&z=…` to start at a place.
+
 Maps widen and narrow lines as Apple's roads do (`MKRoadWidthAtZoomScale` in
 the app, the same widths in `web/map.js`), and spread station dots with the
 lines. `out/gb.svg` is a preview of the whole network.
