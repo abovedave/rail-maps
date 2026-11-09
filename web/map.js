@@ -292,15 +292,17 @@ const follow = () => { update(true); if (moving) requestAnimationFrame(follow) }
 map.addEventListener('region-change-start', () => { if (!moving) { moving = true; requestAnimationFrame(follow) } })
 map.addEventListener('region-change-end', () => { moving = false; update(false) })
 
-// Start on ?lat=…&lon=…&z=… if given, to compare drawings at one place, or
-// else the whole network
+// Start on ?lat=…&lon=…&z=… if given (and turned to ?rot=… degrees), to
+// compare drawings at one place, or else the whole network
 const params = new URLSearchParams(location.search)
 if (params.has('lat') && params.has('lon') && params.has('z')) {
   const width = map.element.clientWidth || 1, height = map.element.clientHeight || 1
   const degreesPerPoint = (metresPerPoint(Number(params.get('z'))) / 40_075_016.686) * 360
   map.region = new mapkit.CoordinateRegion(new mapkit.Coordinate(Number(params.get('lat')), Number(params.get('lon'))),
     new mapkit.CoordinateSpan(degreesPerPoint * height * Math.cos((Number(params.get('lat')) * Math.PI) / 180), degreesPerPoint * width))
-} else {
+}
+if (params.has('rot')) map.rotation = Number(params.get('rot'))
+if (!params.has('lat')) {
   const lats = stations.map((s) => s.coordinate.latitude), lons = stations.map((s) => s.coordinate.longitude)
   map.region = new mapkit.BoundingRegion(Math.max(...lats), Math.max(...lons), Math.min(...lats), Math.min(...lons)).toCoordinateRegion()
 }
