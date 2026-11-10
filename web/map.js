@@ -1,12 +1,11 @@
 // Shows Britain's transit map on Apple Maps with MapKit JS, from
 // out/gb.transit.json (see src/render.ts), the same way the app does.
 //
-// The lines are drawn ahead of time (src/render.ts): zoomed out, an overview
-// of each line on its own track, widening and narrowing as Apple's roads do;
-// zoomed in, side by side by LOOM's transitmap, a drawing for every other
-// zoom, widening and narrowing with their spacing (see scaleAt). Stations
-// are a dot on each line calling there, in its colour, or one white dot
-// zoomed out.
+// Zoomed out, the lines are an overview drawn ahead of time (src/render.ts),
+// each line on its own track, widening and narrowing as Apple's roads do;
+// zoomed in, lines sharing track are drawn side by side here (bundles.js),
+// from the line graph. Stations are a dot on each line calling there, in
+// its colour, or one white dot zoomed out.
 
 import { draw, prepare } from './bundles.js'
 
@@ -86,99 +85,64 @@ const lineStyle = (colour, width) => new mapkit.Style({
 /** Which step to show for a zoom level: the last starting at or before it,
  *  to the nearest whole zoom. */
 const stepIndex = (z) => Math.max(0, transit.steps.findLastIndex((s) => s.zoom <= z + 0.5))
-/** How much wider than drawn to show a step's lines at a zoom. The
- *  overview's widen and narrow as roads do, no thinner than half. Side by
- *  side, lines keep to two thirds of their spacing (as drawn, linePoints of
- *  pitchPoints), which doubles each level in from the step's own, from 0.2
- *  to 3 points wide: in quarter levels, so overlays aren't restyled every
- *  frame. */
-function scaleAt(z, index) {
-  const { drawn, overview, pitch = transit.pitchPoints } = transit.steps[index]
-  if (overview) return Math.max(0.5, roadAt(z) / roadAt(drawn))
-  const spacing = pitch * 2 ** (Math.round((z - drawn) * 4) / 4)
-  const width = spacing * (transit.linePoints / transit.pitchPoints)
-  return Math.min(3, Math.max(0.2, width)) / transit.linePoints
-}
 
-/** Each step's line overlays, made when first shown. */
-const overlays = new Map()
-function overlaysAt(index) {
-  if (!overlays.has(index)) {
-    overlays.set(index, transit.steps[index].lines.map(([colour, line]) => {
-      const points = decodePairs(line, 1e5).map(([lat, lon]) => new mapkit.Coordinate(lat, lon))
-      const overlay = new mapkit.PolylineOverlay(points, { style: lineStyle(colour, transit.linePoints) })
-      overlay.colour = colour
-      return overlay
-    }))
-  }
-  return overlays.get(index)
-}
-
-// MARK: Lines drawn here
-
-/** With ?draw=client, lines sharing track are drawn side by side here, from
- *  the line graph (bundles.js), rather than shown as drawn ahead of time:
- *  redrawn every half zoom level, a pitch apart that doubles every two
- *  levels in (3 points at zoom 14), two thirds of it wide, up to 3 points. */
-const bundles = params.get('draw') === 'client' && transit.graph ? prepare(transit.graph) : undefined
-const pitchAt = (z) => 3 * 2 ** ((z - 14) / 2)
+/** Lines side by side are pitchPoints apart (centre to centre) at zoom 14,
+ *  doubling every two levels in, and two thirds of that wide, from 0.2 to 3
+ *  points. They're redrawn every half zoom level. */
+const bundles = prepare(transit.graph)
+const pitchAt = (z) => transit.pitchPoints * 2 ** ((z - 14) / 2)
 const widthAt = (z) => Math.min(3, Math.max(0.2, (pitchAt(z) * 2) / 3))
-const drawings = new Map()
-function drawingAt(bucket) {
-  if (!drawings.has(bucket)) {
-    const started = performance.now()
-    drawings.set(bucket, draw(bundles, metresPerPoint(bucket), pitchAt(bucket)).map(({ colour, points }) => {
-      const overlay = new mapkit.PolylineOverlay(points.map(([lat, lon]) => new mapkit.Coordinate(lat, lon)), { style: lineStyle(colour, widthAt(bucket)) })
+/** The overview's lines widen and narrow as roads do, no thinner than half
+ *  as drawn: in whole steps, so overlays aren't restyled every frame. */
+const overviewWidthAt = (z, { drawn }) => transit.linePoints * Math.max(0.5, roadAt(z) / roadAt(drawn))
+
+/** Overlays for each overview step and each half zoom drawn side by side,
+ *  made when first shown. */
+const overlays = new Map()
+function overlaysFor(key, lines) {
+  if (!overlays.has(key)) {
+    overlays.set(key, lines().map(({ colour, points }) => {
+      const overlay = new mapkit.PolylineOverlay(points.map(([lat, lon]) => new mapkit.Coordinate(lat, lon)))
       overlay.colour = colour
       return overlay
     }))
-    console.log(`drew zoom ${bucket} in ${Math.round(performance.now() - started)} ms: ${drawings.get(bucket).length} lines`)
   }
-  return drawings.get(bucket)
-}
-/** The half zoom level drawn, kept while the map moves. */
-let bucket
-
-let shownStep, showing = [], scaled
-function showStepLines(z, moving) {
-  const index = stepIndex(z)
-  if (bundles && !transit.steps[index].overview) {
-    if (shownStep !== 'client' || (!moving && bucket !== Math.round(z * 2) / 2)) {
-      if (!moving || shownStep !== 'client') bucket = Math.round(z * 2) / 2
-      const next = drawingAt(bucket)
-      map.removeOverlays(showing)
-      map.addOverlays(next)
-      shownStep = 'client'
-      scaled = widthAt(bucket) / transit.linePoints
-      showing = next
-    }
-    return showing.length
-  }
-  if (shownStep === 'client') { map.removeOverlays(showing); showing = []; shownStep = undefined }
-  const scale = scaleAt(z, index)
-  if (index !== shownStep || scale !== scaled) {
-    const next = overlaysAt(index)
-    for (const overlay of next) overlay.style = lineStyle(overlay.colour, transit.linePoints * scale)
-    if (index !== shownStep) {
-      map.removeOverlays(showing)
-      map.addOverlays(next)
-    }
-    shownStep = index
-    scaled = scale
-    showing = next
-  }
-  return showing.length
+  return overlays.get(key)
 }
 
-/** How wide lines are at a zoom, as a multiple of linePoints, and how much
- *  further apart than pitch points: for station dots to match. */
+/** What's on the map: an overview step's lines, or lines side by side drawn
+ *  for a half zoom level (`half`), and how wide. */
+let shown = { key: undefined, overlays: [], width: 0, half: undefined }
+function showLines(z, moving) {
+  const step = transit.steps[stepIndex(z)]
+  let next
+  if (step.overview) {
+    next = { key: `overview ${step.zoom}`, width: overviewWidthAt(z, step),
+      lines: () => step.lines.map(([colour, line]) => ({ colour, points: decodePairs(line, 1e5) })) }
+  } else {
+    // Kept while the map moves, as drawing takes a moment
+    const half = moving && shown.half !== undefined ? shown.half : Math.round(z * 2) / 2
+    next = { key: `side by side ${half}`, width: widthAt(half), half,
+      lines: () => draw(bundles, metresPerPoint(half), pitchAt(half)) }
+  }
+  if (next.key !== shown.key || next.width !== shown.width) {
+    const lines = overlaysFor(next.key, next.lines)
+    for (const overlay of lines) overlay.style = lineStyle(overlay.colour, next.width)
+    if (next.key !== shown.key) {
+      map.removeOverlays(shown.overlays)
+      map.addOverlays(lines)
+    }
+    shown = { key: next.key, overlays: lines, width: next.width, half: next.half }
+  }
+  return shown.overlays.length
+}
+
+/** How wide lines are, as a multiple of linePoints, and how much further
+ *  apart than pitchPoints: for station dots to match. */
 const pitch = transit.pitchPoints
-function lineScale(z) {
-  if (shownStep === 'client') return { scale: widthAt(bucket) / transit.linePoints, spread: pitchAt(bucket) / pitch }
-  const index = stepIndex(z), { drawn, pitch: drawnPitch = pitch } = transit.steps[index]
-  // Lines' spacing is fixed on the ground, so it doubles each zoom level in,
-  // from the step's own (some drawings have more space between lines)
-  return { scale: scaleAt(z, index), spread: (drawnPitch / pitch) * 2 ** (Math.round((z - drawn) * 10) / 10) }
+function lineScale() {
+  if (shown.half === undefined) return { scale: 1, spread: 1 }
+  return { scale: shown.width / transit.linePoints, spread: pitchAt(shown.half) / pitch }
 }
 
 // MARK: Stations
@@ -248,7 +212,7 @@ let shownAnnotations = new Map()
 function showStations(z) {
   const wanted = new Map()
   if (z >= STATIONS_ZOOM) {
-    const { scale, spread } = lineScale(z)
+    const { scale, spread } = lineScale()
     const coloured = z >= COLOURED_DOTS_ZOOM, labelled = z >= LABELS_ZOOM
     const { center, span } = map.region
     // The view and a quarter of it around, so small pans keep their dots
@@ -291,14 +255,16 @@ function decodeIntegers(text) {
   }
   return values
 }
-/** Each step's names, [text, colour, lon, lat, angle], decoded when first shown. */
+/** Each step's names, [text, colour, lon, lat, angle, side], decoded when
+ *  first shown: the side is how many pitches below its middle, looking
+ *  along it, its line is drawn (lines side by side). */
 const stepNames = new Map()
 function namesOf(index) {
   if (!stepNames.has(index)) {
-    stepNames.set(index, (transit.steps[index].labels ?? []).flatMap(([name, points, angles]) => {
+    stepNames.set(index, (transit.steps[index].labels ?? []).flatMap(([name, points, angles, sides]) => {
       const [text, colour] = transit.labelNames[name]
-      const turns = decodeIntegers(angles)
-      return decodePairs(points, 1e5).map(([lat, lon], i) => [text, colour, lon, lat, turns[i]])
+      const turns = decodeIntegers(angles), halves = sides ? decodeIntegers(sides) : []
+      return decodePairs(points, 1e5).map(([lat, lon], i) => [text, colour, lon, lat, turns[i], (halves[i] ?? 0) / 2])
     }))
   }
   return stepNames.get(index)
@@ -307,19 +273,21 @@ function showNames(z) {
   const wanted = new Map()
   const { center, span } = map.region
   const rotation = Math.round(map.rotation)
-  for (const [text, colour, lon, lat, angle] of namesOf(stepIndex(z))) {
+  const linePitch = shown.half === undefined ? 0 : pitchAt(shown.half)
+  for (const [text, colour, lon, lat, angle, side] of namesOf(stepIndex(z))) {
     if (Math.abs(lat - center.latitude) > span.latitudeDelta * 0.75 || Math.abs(lon - center.longitude) > span.longitudeDelta * 0.75) continue
-    let turn = angle - rotation
-    while (turn > 90) turn -= 180
-    while (turn <= -90) turn += 180
-    const key = `${text}|${lon}|${lat}|${turn}`
+    // Turned to read left to right, and moved onto its line
+    let turn = angle - rotation, below = side * linePitch
+    while (turn > 90) { turn -= 180; below = -below }
+    while (turn <= -90) { turn += 180; below = -below }
+    const key = `${text}|${lon}|${lat}|${turn}|${below.toFixed(1)}`
     wanted.set(key, shownNames.get(key) ?? new mapkit.Annotation(new mapkit.Coordinate(lat, lon), () => {
       const anchor = document.createElement('div')
       anchor.style.cssText = 'position:relative;width:0;height:0'
       const label = document.createElement('div')
       label.className = 'line-name'
       label.textContent = text
-      label.style.cssText = `position:absolute;left:0;top:0;color:#${colour};font-size:${transit.labelPoints ?? 11}px;transform:translate(-50%,-50%) rotate(${turn}deg)`
+      label.style.cssText = `position:absolute;left:0;top:0;color:#${colour};font-size:${transit.labelPoints ?? 11}px;transform:translate(-50%,-50%) rotate(${turn}deg) translateY(${below}px)`
       anchor.append(label)
       return anchor
     }, { enabled: false }))
@@ -333,11 +301,10 @@ function showNames(z) {
 
 function update(moving) {
   const z = zoom()
-  const lines = showStepLines(z, moving)
+  const lines = showLines(z, moving)
   if (!moving) { showNames(z); showStations(z) }
   // For debugging: the zoom, what's drawn and how much is on the map
-  const drawing = shownStep === 'client' ? `drawn here for ${bucket}` : `step ${transit.steps[shownStep].zoom} × ${scaled.toFixed(2)}`
-  status.textContent = `Zoom ${z.toFixed(1)} · ${drawing} · ${lines} lines · ${shownNames.size} names · ${shownAnnotations.size} stations`
+  status.textContent = `Zoom ${z.toFixed(1)} · ${shown.key} · ${lines} lines · ${shownNames.size} names · ${shownAnnotations.size} stations`
 }
 
 // Follow the zoom while the map moves, not just when it stops

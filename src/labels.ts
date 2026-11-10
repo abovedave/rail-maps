@@ -1,7 +1,11 @@
-// Places line names along the drawn lines, for maps to show as text on the
-// line, turned to run along it (as Apple Maps names its transit lines).
+// Places line names along lines, for maps to show as text on the line,
+// turned to run along it (as Apple Maps names its transit lines).
 //
-// For each drawing (render.ts), each line gets its name where it runs about
+// Lines sharing track are placed along it, each with its side of the track
+// (how many pitches to the right of the way it runs), for maps to move the
+// name onto the line as they draw it (web/bundles.js).
+//
+// For each zoom step (render.ts), each line gets its name where it runs about
 // straight for at least the name's length, clear of stations and of other
 // names, repeated every REPEAT points along it. Names come from names.json
 // (linegraph.ts): National Rail by its track's name, the Overground by each
@@ -34,7 +38,7 @@ const NAME_REACH = 600
 type Vec = [number, number]
 /** A placed name: text, colour, its middle and direction (Web Mercator
  *  metres), and half its length. */
-type Label = { text: string; colour: string; at: Vec; along: Vec; half: number }
+type Label = { text: string; colour: string; at: Vec; along: Vec; half: number; side: number }
 
 /** What lines are called near where they run: segments by line, in a grid. */
 export function nameIndex(names: [string, string, Vec[]][], toMercator: (p: Vec) => Vec) {
@@ -64,11 +68,12 @@ export function nameIndex(names: [string, string, Vec[]][], toMercator: (p: Vec)
   }
 }
 
-/** Names for one drawing's lines (Web Mercator metres), as [text, colour,
- *  lon, lat, angle]: the angle in degrees clockwise from east on a north-up
- *  map, between -90 and 90 so it reads left to right. */
+/** Names for one step's lines (Web Mercator metres), as [text, colour,
+ *  lon, lat, angle, side]: the angle in degrees clockwise from east on a
+ *  north-up map, between -90 and 90 so it reads left to right, and the side
+ *  how many pitches below the text's middle (looking along it) its line is. */
 export function placeLabels(
-  lines: { colour: string; points: Vec[] }[],
+  lines: { colour: string; points: Vec[]; side?: number }[],
   drawnMetresPerPoint: number,
   stations: Vec[],
   nameAt: (line: string, at: Vec) => string | undefined,
@@ -111,7 +116,7 @@ export function placeLabels(
     .map((l) => ({ ...l, line: lineOf.get(l.colour)!, length: l.points.reduce((sum, p, i) => sum + (i ? Math.hypot(p[0] - l.points[i - 1][0], p[1] - l.points[i - 1][1]) : 0), 0) }))
     .sort((a, b) => order.indexOf(a.line) === order.indexOf(b.line) ? b.length - a.length : (a.line === 'National Rail' ? 1 : 0) - (b.line === 'National Rail' ? 1 : 0) || order.indexOf(a.line) - order.indexOf(b.line))
 
-  for (const { colour, points, line, length } of ordered) {
+  for (const { colour, points, line, length, side = 0 } of ordered) {
     const distance = [0]
     for (let i = 1; i < points.length; i++) distance.push(distance[i - 1] + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]))
     /** The point a distance along the line. */
@@ -134,7 +139,7 @@ export function placeLabels(
       let bow = 0
       for (let i = 0; i < points.length; i++) if (distance[i] > d - half && distance[i] < d + half) bow = Math.max(bow, segmentDistance(points[i], start, end))
       if (bow > BOW * point) continue
-      const label: Label = { text, colour, at: [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2], along: [(end[0] - start[0]) / chord, (end[1] - start[1]) / chord], half }
+      const label: Label = { text, colour, at: [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2], along: [(end[0] - start[0]) / chord, (end[1] - start[1]) / chord], half, side }
       if (!stationClear(label.at, half) || !clear(label)) continue
       placed.push(label)
       labelGrid.add(label.at, label)
@@ -143,11 +148,13 @@ export function placeLabels(
   }
 
   const round = (v: number) => Math.round(v * 1e5) / 1e5
-  return placed.map(({ text, colour, at, along }) => {
+  return placed.map(({ text, colour, at, along, side }) => {
     let angle = (-Math.atan2(along[1], along[0]) * 180) / Math.PI
+    // Turned round to read left to right, its line's on its other side
+    const turned = angle > 90 || angle <= -90
     if (angle > 90) angle -= 180
     if (angle <= -90) angle += 180
     const [lon, lat] = fromMercator(at[0], at[1])
-    return [text, colour, round(lon), round(lat), Math.round(angle * 10) / 10]
+    return [text, colour, round(lon), round(lat), Math.round(angle * 10) / 10, turned ? -side : side]
   })
 }

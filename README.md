@@ -32,8 +32,8 @@ also its own script (`npm run linegraph`, `topo`, `tidy`, `render`,
 | 3. Merge | `src/topo.ts`, with LOOM `topo`: each line's parallel tracks up to about 95 m apart become one smoothed corridor (about 30 m), then lines merge where they share track (about 50 m), so lines on different tracks nearby (the Elizabeth line under Whitechapel) stay apart | `out/gb.topo.json`, and the first pass in `out/gb.lines.json` |
 | 4. Tidy and order | `src/tidy.ts` simplifies knots `topo` leaves (junctions under 200 m apart become one, short parallel ways one, station-free bypasses within 500 m of a route carrying the same lines are dropped, such as the Redhill avoiding line, a station's platforms linked by under 400 m of track become one, or under 1.5 km at a terminus, so its lines run in together, and turn restrictions the services show are wrong are lifted), then LOOM `loom` orders the lines on each corridor | `out/gb.map.json` |
 | Check | `src/check.ts` (`npm run check`): every service in `out/gb.routes.json` (written by step 2) still runs unbroken from stop to stop on the finished graph; lists any breaks, by line | the build log |
-| 5. Draw | `src/render.ts`: LOOM `transitmap` draws lines side by side for zooms 14, 16 and 18, and an overview further out | `out/gb.transit.json` |
-| 6. Show | `web/map.js` with MapKit JS, or the app | the map |
+| 5. Draw | `src/render.ts`: the overview drawn zoomed out, the ordered line graph for maps to draw lines side by side zoomed in, line names and station dots | `out/gb.transit.json` |
+| 6. Show | `web/map.js` with MapKit JS (`web/bundles.js` draws lines side by side), or the app | the map |
 | Track graph | `src/tracks.ts`: all running track, split at junctions and the app's stations, for routing trains along real track | `out/gb.tracks.json` |
 
 **Stations.** A station's stops (its platforms, often each their own OSM
@@ -74,15 +74,16 @@ over National Rail). Side by side there, lines would knot London's termini
 into a bundle and blur colours. Its lines widen and narrow as Apple's roads
 do (`MKRoadWidthAtZoomScale` in the app, the same widths in `web/map.js`).
 
-Zoomed in, lines sharing track are drawn side by side with LOOM's
-`transitmap`, 2 pt wide with 1 pt between, for zooms 14, 16 and 18, each
-shown from a level before to half a level after: `STEPS` in `src/render.ts`.
-Spacing is fixed on the ground, so a drawing's lines spread apart as you
-zoom in; maps keep lines two thirds of their spacing wide, from 0.2 to 3 pt
-(`scaleAt` in `web/map.js`), and spread station dots with them.
+Zoomed in (from zoom 13), lines sharing track are drawn side by side by the
+map itself, from the ordered line graph in `out/gb.transit.json`
+(`web/bundles.js`): each track's lines offset from its centreline in loom's
+order, cut back at junctions and joined through them with curves. It takes
+about 30 ms for all of Britain, so the map redraws every half zoom level:
+lines 3 pt apart at zoom 14, doubling every two levels in, two thirds of
+that wide, up to 3 pt. Line names are placed along the track, with the side
+their line is drawn on, for the map to move them onto it.
 
-The web preview takes `?lat=…&lon=…&z=…` to start at a place. `out/gb.svg`
-is a preview of the whole network.
+The web preview takes `?lat=…&lon=…&z=…` to start at a place.
 
 ## Updating the app
 
@@ -96,17 +97,24 @@ npm run build                    # all of Britain: about 10 minutes, 24 GB of me
 npm run app                 # copy both files into the app
 ```
 
+the app still draws lines side by side from transitmap's drawings, which
+`gb.transit.json` no longer has: port `web/bundles.js` to it before copying
+a new build in.
+
 Changing how lines are grouped or coloured (`src/lines.ts`) needs the whole
-build. Changing line width, spacing or zooms (`src/render.ts`) needs only
+build. Changing line width or spacing is in `web/map.js` (and the app),
+zoom steps and line names in `src/render.ts`, which needs only
 `npm run render` (a few seconds), and colours (`LINES` in `src/lines.ts`)
 the same. Changing tidying (`src/tidy.ts`) needs `npm run tidy`, then
 `npm run render`.
 
 ## Output
 
-`out/gb.transit.json` is every zoom step in one compact file for apps:
-lines as Google encoded polylines, and each station's position, direction
-and the colours of the lines calling there, for drawing its dots.
+`out/gb.transit.json` is the map in one compact file for apps: the
+overview's lines as Google encoded polylines, the ordered line graph to draw
+lines side by side, line names for each zoom step, and each station's
+position, direction and the colours of the lines calling there, for drawing
+its dots. Its format is at the top of `src/render.ts`.
 
 `out/gb.map.json` is LOOM's GeoJSON line graph: `LineString` edges with
 `from`, `to` and an ordered `lines` array (`id`, `label`, `color`), and
