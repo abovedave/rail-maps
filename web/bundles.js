@@ -5,8 +5,9 @@
 // Each edge's lines are offset from its centreline, a pitch apart, the
 // first furthest right looking along the edge (loom's order). Lines going
 // on through a node are cut back from it to leave room, and joined from one
-// edge to the next by a curve; lines ending there run up to it. Each line's pieces are then
-// chained into as few polylines as they'll go.
+// edge to the next by a curve; lines ending there run up to it. Each line's
+// pieces are then chained into as few polylines as they'll go, and lines of
+// one colour joined where their ends meet.
 //
 // Geometry is in Web Mercator metres; `draw` returns lines as [lat, lon].
 
@@ -241,5 +242,44 @@ export function draw({ lines, nodes, edges, edgesAt, bans }, metresPerPoint, pit
   }))
   for (const join of curves) if (!used.has(join)) out.push({ colour: lines[join.line][1], points: join.points })
 
-  return out.map(({ colour, points }) => ({ colour, points: simplify(points, metresPerPoint / 4).map(toLatLon) }))
+  return joinEnds(out).map(({ colour, points }) => ({ colour, points: simplify(points, metresPerPoint / 4).map(toLatLon) }))
+}
+
+/** Lines of one colour joined where their ends meet, so maps have about a
+ *  quarter as many to draw: chains stop where lines branch, and the curves
+ *  into each branch are their own. Each line goes on into the first it
+ *  meets, at its last end, then its first. */
+function joinEnds(lines) {
+  const key = (colour, [x, y]) => `${colour}|${x},${y}`
+  /** Each end, by colour and point: line index × 2, + 1 for its last. */
+  const ends = new Map()
+  lines.forEach(({ colour, points }, i) => {
+    for (const [end, point] of [[0, points[0]], [1, points[points.length - 1]]]) {
+      const k = key(colour, point)
+      ends.set(k, [...(ends.get(k) ?? []), i * 2 + end])
+    }
+  })
+  const used = new Uint8Array(lines.length)
+  /** The first line not yet used with an end at a point, and which end. */
+  const meeting = (colour, point) => {
+    const end = (ends.get(key(colour, point)) ?? []).find((e) => !used[e >> 1])
+    if (end !== undefined) used[end >> 1] = 1
+    return end
+  }
+  const out = []
+  lines.forEach(({ colour, points: first }, i) => {
+    if (used[i]) return
+    used[i] = 1
+    let points = [...first]
+    for (let end; (end = meeting(colour, points[points.length - 1])) !== undefined;) {
+      const next = lines[end >> 1].points
+      points.push(...(end & 1 ? [...next].reverse() : next).slice(1))
+    }
+    for (let end; (end = meeting(colour, points[0])) !== undefined;) {
+      const before = lines[end >> 1].points
+      points = [...(end & 1 ? before : [...before].reverse()).slice(0, -1), ...points]
+    }
+    out.push({ colour, points })
+  })
+  return out
 }
