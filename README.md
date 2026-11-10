@@ -81,18 +81,72 @@ apart however far you zoom.
 
 ### The steps
 
-| Step | Script | What it does | Writes |
-|---|---|---|---|
-| Download | `npm run osm` | Geofabrik's Great Britain extract | `vendor/osm/great-britain-latest.osm.pbf` |
-| 1. Line graph | `npm run linegraph` (`map/linegraph.ts`) | Reads every `route=train` relation (and the Tyne and Wear Metro's `light_rail` ones) with osmium. Decides each service's line (`map/lines.ts`), keeps just the parts of each way its trains use, and splits them into edges at junctions, stops and where the lines change. Groups stops into stations (`map/lib/stationGroups.ts`). | `out/gb.linegraph.json`, `out/gb.routes.json` (each service's stops, for the check), `out/gb.names.json` (what each stretch of line is called, for line names), `out/gb.stations.json` (each stop's station) |
-| 2. Merge | `npm run topo` (`map/topo.ts`) | LOOM's `topo` merges parallel tracks into one corridor in two passes: each line's own tracks first (up to about 90 m apart), then lines where they share track (about 50 m). In one pass, lines on different tracks close together would merge: the Elizabeth line under Whitechapel onto the Overground above it. Takes most of the build's time. | `out/gb.topo.json` |
-| 3. Tidy and order | `npm run tidy` (`map/tidy.ts`, then LOOM `loom`) | Unties the knots topo leaves (see [Tidying](#tidying)), then LOOM's `loom` orders the lines on each corridor so they cross as little as they can. | `out/gb.map.json` |
-| Check | `npm run check` (`map/check.ts`) | Every service in `out/gb.routes.json` still runs unbroken from stop to stop on the finished graph, turning only where it may. Lists any breaks, by line; the build carries on regardless. | the build log |
-| 4. Render | `npm run render` (`map/render.ts`) | The ordered line graph in a compact form, line names placed for each zoom step, and each station's dots. A few seconds. | `out/gb.transit.json` |
-| Track graph | `npm run tracks` (`map/tracks.ts`) | Separately, all running track split at junctions and the app's stations, for the app to route trains along real track. | `out/gb.tracks.json` |
+`npm run build` runs steps 1 to 4, the check and the track graph in turn.
+Each is its own script too, to rerun from any step: its inputs are the
+files the steps before it wrote.
 
-`npm run build` runs them all in turn. Each is its own script too, to rerun
-from any step: its inputs are the files the steps before it wrote.
+#### Download: `npm run osm`
+
+Geofabrik's Great Britain extract.
+
+Writes `vendor/osm/great-britain-latest.osm.pbf`.
+
+#### 1. Line graph: `npm run linegraph`
+
+`map/linegraph.ts` reads every `route=train` relation (and the Tyne and
+Wear Metro's `light_rail` ones) with osmium, and:
+
+- decides each service's line (`map/lines.ts`)
+- keeps just the parts of each way its trains use, split into edges at
+  junctions, stops and where the lines change
+- groups stops into stations (`map/lib/stationGroups.ts`)
+
+Writes:
+
+- `out/gb.linegraph.json`: the line graph
+- `out/gb.routes.json`: each service's stops, for the check
+- `out/gb.names.json`: what each stretch of line is called, for line names
+- `out/gb.stations.json`: each stop's station
+
+#### 2. Merge: `npm run topo`
+
+`map/topo.ts` runs LOOM's `topo` to merge parallel tracks into one
+corridor, in two passes: each line's own tracks first (up to about 90 m
+apart), then lines where they share track (about 50 m). In one pass, lines
+on different tracks close together would merge: the Elizabeth line under
+Whitechapel onto the Overground above it. This takes most of the build's
+time.
+
+Writes `out/gb.topo.json`.
+
+#### 3. Tidy and order: `npm run tidy`
+
+`map/tidy.ts` unties the knots topo leaves (see [Tidying](#tidying)), then
+LOOM's `loom` orders the lines on each corridor so they cross as little as
+they can.
+
+Writes `out/gb.map.json`.
+
+#### Check: `npm run check`
+
+`map/check.ts` checks every service in `out/gb.routes.json` still runs
+unbroken from stop to stop on the finished graph, turning only where it
+may. It lists any breaks, by line, in the build log; the build carries on
+regardless.
+
+#### 4. Render: `npm run render`
+
+`map/render.ts` writes the ordered line graph in a compact form, line names
+placed for each zoom step, and each station's dots. A few seconds.
+
+Writes `out/gb.transit.json`.
+
+#### Track graph: `npm run tracks`
+
+Separately, `map/tracks.ts` splits all running track at junctions and
+the app's stations, for the app to route trains along real track.
+
+Writes `out/gb.tracks.json`.
 
 ### Lines
 
