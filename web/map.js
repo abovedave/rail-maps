@@ -8,7 +8,10 @@
 // are a dot on each line calling there, in its colour, or one white dot
 // zoomed out.
 
+import { draw, prepare } from './bundles.js'
+
 const status = document.getElementById('status')
+const params = new URLSearchParams(location.search)
 
 /** Station dots from this zoom in, coloured from `COLOURED_DOTS_ZOOM`, and
  *  named from `LABELS_ZOOM`. */
@@ -111,9 +114,47 @@ function overlaysAt(index) {
   return overlays.get(index)
 }
 
+// MARK: Lines drawn here
+
+/** With ?draw=client, lines sharing track are drawn side by side here, from
+ *  the line graph (bundles.js), rather than shown as drawn ahead of time:
+ *  redrawn every half zoom level, a pitch apart that doubles every two
+ *  levels in (3 points at zoom 14), two thirds of it wide, up to 3 points. */
+const bundles = params.get('draw') === 'client' && transit.graph ? prepare(transit.graph) : undefined
+const pitchAt = (z) => 3 * 2 ** ((z - 14) / 2)
+const widthAt = (z) => Math.min(3, Math.max(0.2, (pitchAt(z) * 2) / 3))
+const drawings = new Map()
+function drawingAt(bucket) {
+  if (!drawings.has(bucket)) {
+    const started = performance.now()
+    drawings.set(bucket, draw(bundles, metresPerPoint(bucket), pitchAt(bucket)).map(({ colour, points }) => {
+      const overlay = new mapkit.PolylineOverlay(points.map(([lat, lon]) => new mapkit.Coordinate(lat, lon)), { style: lineStyle(colour, widthAt(bucket)) })
+      overlay.colour = colour
+      return overlay
+    }))
+    console.log(`drew zoom ${bucket} in ${Math.round(performance.now() - started)} ms: ${drawings.get(bucket).length} lines`)
+  }
+  return drawings.get(bucket)
+}
+/** The half zoom level drawn, kept while the map moves. */
+let bucket
+
 let shownStep, showing = [], scaled
-function showStepLines(z) {
+function showStepLines(z, moving) {
   const index = stepIndex(z)
+  if (bundles && !transit.steps[index].overview) {
+    if (shownStep !== 'client' || (!moving && bucket !== Math.round(z * 2) / 2)) {
+      if (!moving || shownStep !== 'client') bucket = Math.round(z * 2) / 2
+      const next = drawingAt(bucket)
+      map.removeOverlays(showing)
+      map.addOverlays(next)
+      shownStep = 'client'
+      scaled = widthAt(bucket) / transit.linePoints
+      showing = next
+    }
+    return showing.length
+  }
+  if (shownStep === 'client') { map.removeOverlays(showing); showing = []; shownStep = undefined }
   const scale = scaleAt(z, index)
   if (index !== shownStep || scale !== scaled) {
     const next = overlaysAt(index)
@@ -133,6 +174,7 @@ function showStepLines(z) {
  *  further apart than pitch points: for station dots to match. */
 const pitch = transit.pitchPoints
 function lineScale(z) {
+  if (shownStep === 'client') return { scale: widthAt(bucket) / transit.linePoints, spread: pitchAt(bucket) / pitch }
   const index = stepIndex(z), { drawn, pitch: drawnPitch = pitch } = transit.steps[index]
   // Lines' spacing is fixed on the ground, so it doubles each zoom level in,
   // from the step's own (some drawings have more space between lines)
@@ -291,10 +333,10 @@ function showNames(z) {
 
 function update(moving) {
   const z = zoom()
-  const lines = showStepLines(z)
+  const lines = showStepLines(z, moving)
   if (!moving) { showNames(z); showStations(z) }
   // For debugging: the zoom, what's drawn and how much is on the map
-  const drawing = `step ${transit.steps[shownStep].zoom} × ${scaled.toFixed(2)}`
+  const drawing = shownStep === 'client' ? `drawn here for ${bucket}` : `step ${transit.steps[shownStep].zoom} × ${scaled.toFixed(2)}`
   status.textContent = `Zoom ${z.toFixed(1)} · ${drawing} · ${lines} lines · ${shownNames.size} names · ${shownAnnotations.size} stations`
 }
 
@@ -306,7 +348,6 @@ map.addEventListener('region-change-end', () => { moving = false; update(false) 
 
 // Start on ?lat=…&lon=…&z=… if given (and turned to ?rot=… degrees), to
 // compare drawings at one place, or else the whole network
-const params = new URLSearchParams(location.search)
 if (params.has('lat') && params.has('lon') && params.has('z')) {
   const width = map.element.clientWidth || 1, height = map.element.clientHeight || 1
   const degreesPerPoint = (metresPerPoint(Number(params.get('z'))) / 40_075_016.686) * 360

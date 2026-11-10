@@ -21,9 +21,9 @@
 
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
-import { encode, encodeIntegers, fromMercator, mercX, mercY, METRES_AT_ZOOM_0, simplify } from './geo.ts'
+import { encode, encodeIntegers, fromMercator, mercX, mercY, METRES_AT_ZOOM_0, simplify, simplifyLatLon } from './geo.ts'
 import { LABEL_POINTS, nameIndex, placeLabels } from './labels.ts'
-import { type Graph, readStationKeys } from './graph.ts'
+import { type Graph, isEdge, isNode, readStationKeys } from './graph.ts'
 import { LINES } from './lines.ts'
 import { darkColours, stationDots } from './stations.ts'
 import type { LatLon } from './osm.ts'
@@ -202,7 +202,39 @@ function drawing(metresPerPoint: number, gap: number) {
   return pieces
 }
 
+/** How far the line graph's edges can stray from their track when
+ *  simplified, in metres. */
+const GRAPH_SIMPLIFY = 3
+
+/** The ordered line graph, for maps to draw lines side by side themselves
+ *  (web/bundles.js): { lines: [[id, colour]], nodes: [[lon, lat]], edges:
+ *  [[from, to, encoded polyline from → to, line indexes]], bans: [[node,
+ *  line, neighbour, neighbour]] }. An edge's first line is drawn furthest
+ *  right, looking from `from` to `to` (loom's order); a ban is a turn a line
+ *  can't make at a node, between two of its neighbours. */
+function lineGraph(g: Graph) {
+  const lines: [string, string][] = [], lineIndex = new Map<string, number>()
+  const nodes: [number, number][] = [], nodeIndex = new Map<string, number>()
+  const round = (v: number) => Math.round(v * 1e6) / 1e6
+  for (const n of g.features.filter(isNode)) {
+    nodeIndex.set(n.properties.id, nodes.length)
+    nodes.push([round(n.geometry.coordinates[0]), round(n.geometry.coordinates[1])])
+  }
+  const lineOf = (id: string, colour: string) => {
+    if (!lineIndex.has(id)) { lineIndex.set(id, lines.length); lines.push([id, colour.toLowerCase()]) }
+    return lineIndex.get(id)!
+  }
+  const edges = g.features.filter(isEdge).map((e) => {
+    const path = simplifyLatLon(e.geometry.coordinates.map(([lon, lat]): LatLon => [lat, lon]), GRAPH_SIMPLIFY)
+    return [nodeIndex.get(e.properties.from)!, nodeIndex.get(e.properties.to)!, encode(path), e.properties.lines.map((l) => lineOf(l.id, l.color))]
+  })
+  const bans = g.features.filter(isNode).flatMap((n) => (n.properties.excluded_conn ?? [])
+    .filter((c) => lineIndex.has(c.line) && nodeIndex.has(c.node_from) && nodeIndex.has(c.node_to))
+    .map((c) => [nodeIndex.get(n.properties.id)!, lineIndex.get(c.line)!, nodeIndex.get(c.node_from)!, nodeIndex.get(c.node_to)!]))
+  return { lines, nodes, edges, bans }
+}
+
 writeFileSync('out/gb.transit.json', JSON.stringify({
   linePoints: LINE_POINTS, pitchPoints: LINE_POINTS + GAP_POINTS, labelPoints: LABEL_POINTS, labelNames, darkColours: darkColours(),
-  stations, steps,
+  stations, steps, graph: lineGraph(graphJson),
 }))
