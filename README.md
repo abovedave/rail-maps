@@ -10,20 +10,37 @@ the app (`../the app`) both draw.
 
 ## Quick start
 
-Needs Node 24+, osmium and cmake (`brew install node osmium-tool cmake`).
+Needs Node 24+, osmium and cmake (`brew install node osmium-tool cmake`),
+and LOOM, built as below.
 
 ```sh
 npm install                  # TypeScript, for type checking
-npm run setup                # build LOOM, download the GB extract (~2 GB)
+npm run osm                  # the GB extract from Geofabrik (~2 GB)
 npm run build                # all of Britain: about 10 minutes, 24 GB of memory
 echo APPLE_MAPKIT_TOKEN=… > .env
 npm run web                  # http://localhost:8080
 ```
 
-`npm run setup` runs `npm run loom` (clones and builds
-[LOOM](https://github.com/ad-freiburg/loom) into `vendor/loom`) and
-`npm run osm` (downloads Geofabrik's extract into `vendor/osm`, or a newer
-one if there is one: they update it daily).
+`npm run osm` downloads the extract into `vendor/osm`, or a newer one if
+there is one (Geofabrik update it daily).
+
+### Installing LOOM
+
+The build runs two of [LOOM](https://github.com/ad-freiburg/loom)'s
+programs, `topo` and `loom`, from `vendor/loom/build`. Build them there,
+at the commit the map is made with (LOOM's output changes between
+versions):
+
+```sh
+git clone https://github.com/ad-freiburg/loom.git vendor/loom
+git -C vendor/loom checkout 1e47578
+git -C vendor/loom submodule update --init --recursive
+cmake -S vendor/loom -B vendor/loom/build -DCMAKE_BUILD_TYPE=Release
+cmake --build vendor/loom/build -j8 --target topo loom
+```
+
+A few minutes. To try a newer LOOM, check out another commit and run the
+last three lines again, then compare the map.
 
 The web preview takes `?lat=…&lon=…&z=…` to start at a place, and
 `&rot=…` to start turned.

@@ -6,10 +6,8 @@
   "license": "MIT",
   "description": "Transit map overlays of Britain's railways from OpenStreetMap",
   "scripts": {
-    "setup": "npm run loom && npm run osm",
-    "loom": "[ -d vendor/loom ] || git clone --recurse-submodules https://github.com/ad-freiburg/loom.git vendor/loom; cmake -S vendor/loom -B vendor/loom/build -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build vendor/loom/build -j8 --target topo loom",
     "osm": "mkdir -p vendor/osm && curl -fL --progress-bar -z vendor/osm/great-britain-latest.osm.pbf -o vendor/osm/great-britain-latest.osm.pbf https://download.geofabrik.de/europe/great-britain-latest.osm.pbf",
-    "prebuild": "[ -x vendor/loom/build/topo ] || npm run loom; [ -f vendor/osm/great-britain-latest.osm.pbf ] || npm run osm",
+    "prebuild": "[ -x vendor/loom/build/topo ] || { echo 'LOOM is missing: see Installing LOOM in the README' >&2; exit 1; }; [ -f vendor/osm/great-britain-latest.osm.pbf ] || npm run osm",
     "build": "npm run linegraph && npm run topo && npm run tidy && npm run check && npm run render && npm run tracks",
     "linegraph": "mkdir -p out && node map/linegraph.ts vendor/osm/great-britain-latest.osm.pbf out/gb.routes.json out/gb.names.json out/gb.stations.json > out/gb.linegraph.json",
     "topo": "node map/topo.ts out/gb.linegraph.json > out/gb.topo.json",
