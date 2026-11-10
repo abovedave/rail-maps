@@ -26,7 +26,7 @@
 
 import { writeFileSync } from 'node:fs'
 import { simplifyLatLon } from './geo.ts'
-import { lineColour, routeLine } from './lines.ts'
+import { lineColour, serviceLine } from './lines.ts'
 import { filtered, inNorthernIreland, type LatLon } from './osm.ts'
 import { type CodedStation, type StopArea, stationGroups } from './stationGroups.ts'
 
@@ -36,29 +36,8 @@ if (!pbf) {
   process.exit(1)
 }
 
-/** Routes whose train company isn't known, by name, to report. */
+/** Train routes left out as of no known company, by name, to report. */
 const unknown = new Map<string, number>()
-
-/** The line a service draws as (see routeLine in lines.ts). Light rail is
- *  only the Tyne and Wear Metro, not trams. Routes of no known company
- *  (heritage railways, charters, mistagged track) are left out. */
-function serviceLine(tags: Record<string, string>): string {
-  if (tags.route === 'light_rail' && tags.network !== 'Tyne and Wear Metro') return ''
-  const line = routeLine(tags)
-  if (!line) {
-    const name = tags.brand || tags.operator || tags.network || tags.name || '(unnamed)'
-    unknown.set(name, (unknown.get(name) ?? 0) + 1)
-  }
-  return line ?? ''
-}
-
-/** Stations in the Elizabeth line's tunnel under central London. Its
- *  services that never call at one end at Liverpool Street's or
- *  Paddington's surface platforms, on National Rail's track, and are drawn
- *  as National Rail, as TfL's map does: right over the tunnel, their
- *  terminus would otherwise be merged into it (topo.ts merges a line's
- *  tracks close together). */
-const TUNNEL_STOPS = new Set(['Paddington', 'Bond Street', 'Tottenham Court Road', 'Farringdon', 'Liverpool Street', 'Whitechapel'])
 
 /** Track trains run on: heritage, tourist and non-rail ways are left out.
  *  Track tagged as under construction is kept, as only ways in routes are
@@ -121,16 +100,20 @@ for await (const { type, id, tags, at, nodes, members } of filtered(pbf, ['r/rou
     stopAreas.push({ crs: tags['ref:crs'], members: members!.filter((m) => m.type === 'n').map((m) => m.id) })
   } else if (tags.route === 'train' || tags.route === 'light_rail') {
     // Only train routes: stop areas can bring in others (bus, ferry) they list
-    let service = serviceLine(tags)
-    if (!service) continue
     const ways: number[][] = []
     const stops = new Set<number>()
     for (const member of members!) {
       if (member.type === 'w' && wayNodes.get(member.id)?.length! > 1) ways.push(wayNodes.get(member.id)!)
-      if (member.type === 'n' && member.role.startsWith('stop')) { stopNodes.add(member.id); stops.add(member.id) }
+      if (member.type === 'n' && member.role.startsWith('stop')) stops.add(member.id)
     }
-    if (!stops.size) for (const n of ways.flat()) if (trackStops.has(n)) { stopNodes.add(n); stops.add(n) }
-    if (service === 'Elizabeth line' && ![...stops].some((n) => TUNNEL_STOPS.has(names.get(n) ?? ''))) service = 'National Rail'
+    if (!stops.size) for (const n of ways.flat()) if (trackStops.has(n)) stops.add(n)
+    const service = serviceLine(tags, [...stops].map((n) => names.get(n) ?? ''))
+    if (!service) {
+      const name = tags.brand || tags.operator || tags.network || tags.name || '(unnamed)'
+      if (tags.route === 'train') unknown.set(name, (unknown.get(name) ?? 0) + 1)
+      continue
+    }
+    for (const n of stops) stopNodes.add(n)
     routes.push({ name: tags.name || `r${id}`, line: service, stops: [...stops] })
     ways.forEach((nodes, i) => {
       const used = usedPart(nodes, ways[i - 1], ways[i + 1], stops)

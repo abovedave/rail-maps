@@ -90,7 +90,7 @@ const NATIONAL_RAIL = new Set(['national rail', 'network rail'])
 /** The line a route is drawn as: London's lines by their `ref`, companies
  *  with their own line, otherwise National Rail. Undefined for routes of no
  *  known company, unless tagged as National Rail or Network Rail's. */
-export function routeLine(tags: Record<string, string>): string | undefined {
+function routeLine(tags: Record<string, string>): string | undefined {
   if (tags.ref && tags.ref in LONDON_REFS) return LONDON_REFS[tags.ref]
   const company = trainCompany(tags)
   if (!company) {
@@ -98,4 +98,25 @@ export function routeLine(tags: Record<string, string>): string | undefined {
     return national ? 'National Rail' : undefined
   }
   return OWN_LINES.has(company) ? company : 'National Rail'
+}
+
+/** Stations in the Elizabeth line's tunnel under central London. Its
+ *  services that never call at one end at Liverpool Street's or
+ *  Paddington's surface platforms, on National Rail's track, and are drawn
+ *  as National Rail, as TfL's map does: right over the tunnel, their
+ *  terminus would otherwise be merged into it (topo.ts merges a line's
+ *  tracks close together). */
+const TUNNEL_STOPS = new Set(['Paddington', 'Bond Street', 'Tottenham Court Road', 'Farringdon', 'Liverpool Street', 'Whitechapel'])
+
+/** The line a service (a `route=train` or `light_rail` relation, calling at
+ *  stops of these names) is drawn as (see routeLine), or undefined if it
+ *  isn't drawn: light rail other than the Tyne and Wear Metro (trams), and
+ *  routes of no known company (heritage railways, charters, mistagged
+ *  track). Elizabeth line services that stay out of its tunnel are
+ *  National Rail (see TUNNEL_STOPS). */
+export function serviceLine(tags: Record<string, string>, stopNames: string[]): string | undefined {
+  if (tags.route === 'light_rail' && tags.network !== 'Tyne and Wear Metro') return
+  const line = routeLine(tags)
+  if (line === 'Elizabeth line' && !stopNames.some((name) => TUNNEL_STOPS.has(name))) return 'National Rail'
+  return line
 }
