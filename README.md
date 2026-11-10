@@ -103,9 +103,9 @@ npm run build                    # all of Britain: about 10 minutes, 24 GB of me
 npm run app                 # copy both files into the app
 ```
 
-the app still draws lines side by side from transitmap's drawings, which
-`gb.transit.json` no longer has: port `web/bundles.js` to it before copying
-a new build in.
+the app draws lines side by side as the web map does
+(`Map/TransitDrawing.swift`, a port of `web/bundles.js`): a change
+to one belongs in the other.
 
 Changing how lines are grouped or coloured (`map/lines.ts`) needs the whole
 build. Changing line width or spacing is in `web/map.js` (and the app),
