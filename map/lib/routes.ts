@@ -26,25 +26,35 @@ export function services(features: Feature[], stopFeatures: Feature[], keys: Sta
   const nodes = new Map<string, NodeFeature>()
   const stationNode = new Map<string, string>()
   const nodesOfStation = new Map<string, NodeFeature[]>()
+
   for (const f of features) {
     if (!isNode(f)) continue
+
     nodes.set(f.properties.id, f)
+
     if (f.properties.station_id) stationNode.set(f.properties.station_id, f.properties.id)
     if (f.properties.station_label) pushTo(nodesOfStation, stationKey(keys, f), f)
   }
+
   const stopsFound = new Map<string, NodeFeature>()
+
   for (const f of stopFeatures) if (isNode(f) && f.properties.station_id) stopsFound.set(f.properties.station_id, f)
 
   /** Each node's edges: the node at the other end, and the lines on it. */
   const next = new Map<string, { to: string; lines: Set<string> }[]>()
+
   for (const f of features) {
     if (!isEdge(f)) continue
+
     const { from, to } = f.properties
     const lines = new Set(lineIds(f))
+
     pushTo(next, from, { to, lines })
     pushTo(next, to, { to: from, lines })
   }
+
   const carries = (node: string, line: string) => (next.get(node) ?? []).some((e) => e.lines.has(line))
+
   /** Whether a line may go from one neighbour of a node to another. */
   const allowed = (node: string, line: string, from: string, to: string) =>
     !(nodes.get(node)!.properties.excluded_conn ?? []).some((c) => c.line === line && c.node_from === from && c.node_to === to)
@@ -56,6 +66,7 @@ export function services(features: Feature[], stopFeatures: Feature[], keys: Sta
   function nodesFor(stop: string, line: string): string[] {
     const own = stationNode.get(stop)
     const found = stopsFound.get(stop)
+
     const near = found
       ? (nodesOfStation.get(stationKey(keys, found)) ?? [])
         .map((f) => ({ id: f.properties.id as string, d: metres(f.geometry.coordinates, found.geometry.coordinates) }))
@@ -63,6 +74,7 @@ export function services(features: Feature[], stopFeatures: Feature[], keys: Sta
         .sort((x, y) => (carries(x.id, line) ? 0 : MATCH) + x.d - ((carries(y.id, line) ? 0 : MATCH) + y.d))
         .map(({ id }) => id)
       : []
+
     return [...new Set([...(own ? [own] : []), ...near])]
   }
 
@@ -73,17 +85,24 @@ export function services(features: Feature[], stopFeatures: Feature[], keys: Sta
     // States are a node and where the train came from
     const back = new Map<string, string | null>([[`${start}|`, null]])
     const queue: [string, string | null][] = [[start, null]]
+
     for (let i = 0; i < queue.length; i++) {
       const [at, came] = queue[i]
+
       if (at === end) {
         const nodesOnWay: string[] = []
+
         for (let key: string | null = `${at}|${came ?? ''}`; key; key = back.get(key)!) nodesOnWay.unshift(key.split('|')[0])
+
         return nodesOnWay
       }
+
       for (const { to, lines } of next.get(at) ?? []) {
         if (!lines.has(line) || to === came || (!anyTurn && came && !allowed(at, line, came, to))) continue
+
         const state = `${to}|${at}`
         if (back.has(state)) continue
+
         back.set(state, `${at}|${came ?? ''}`)
         queue.push([to, at])
       }
@@ -95,16 +114,23 @@ export function services(features: Feature[], stopFeatures: Feature[], keys: Sta
   function runs(routes: Route[]) {
     const found: { route: Route; from: string[]; to: string[] }[] = []
     let skipped = 0
+
     for (const route of routes) {
       const stops: string[][] = []
+
       for (const stop of route.stops) {
         const candidates = nodesFor(stop, route.line)
+
         if (!candidates.length) { skipped++; continue }
+
         const last = stops[stops.length - 1]
+
         if (!last || last[0] !== candidates[0]) stops.push(candidates)
       }
+
       for (let i = 1; i < stops.length; i++) found.push({ route, from: stops[i - 1], to: stops[i] })
     }
+
     return { runs: found, skipped }
   }
 
@@ -113,6 +139,7 @@ export function services(features: Feature[], stopFeatures: Feature[], keys: Sta
   function way(run: { route: Route; from: string[]; to: string[] }, anyTurn = false): string[] | undefined {
     for (const a of run.from) for (const b of run.to) {
       if (a === b) return [a]
+
       const found = path(a, b, run.route.line, anyTurn)
       if (found) return found
     }

@@ -15,6 +15,7 @@ export const LINES: Record<string, { colour: string; dark?: string }> = {
   'Merseyrail': { colour: 'E6B800' },
   'Tyne and Wear Metro': { colour: 'F59B00' },
 }
+
 export const lineColour = (line: string) => LINES[line]?.colour ?? '808080'
 
 /** London's lines, by the `ref` of their `route=train` relations: the
@@ -68,6 +69,7 @@ export const TRAIN_COMPANIES: Record<string, string[]> = {
 }
 
 const companies = new Map<string, string>()
+
 for (const [name, aliases] of Object.entries(TRAIN_COMPANIES)) {
   for (const alias of [name, ...aliases]) companies.set(alias.toLowerCase(), name)
 }
@@ -92,11 +94,15 @@ const NATIONAL_RAIL = new Set(['national rail', 'network rail'])
  *  known company, unless tagged as National Rail or Network Rail's. */
 function routeLine(tags: Record<string, string>): string | undefined {
   if (tags.ref && tags.ref in LONDON_REFS) return LONDON_REFS[tags.ref]
+
   const company = trainCompany(tags)
+
   if (!company) {
     const national = [tags.network, tags.operator].some((name) => name && NATIONAL_RAIL.has(name.trim().toLowerCase()))
+
     return national ? 'National Rail' : undefined
   }
+
   return OWN_LINES.has(company) ? company : 'National Rail'
 }
 
@@ -116,7 +122,9 @@ const TUNNEL_STOPS = new Set(['Paddington', 'Bond Street', 'Tottenham Court Road
  *  National Rail (see TUNNEL_STOPS). */
 export function serviceLine(tags: Record<string, string>, stopNames: string[]): string | undefined {
   if (tags.route === 'light_rail' && tags.network !== 'Tyne and Wear Metro') return
+
   const line = routeLine(tags)
   if (line === 'Elizabeth line' && !stopNames.some((name) => TUNNEL_STOPS.has(name))) return 'National Rail'
+
   return line
 }

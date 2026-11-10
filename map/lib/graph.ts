@@ -19,11 +19,13 @@ export interface TurnBan { line: string; node_from: string; node_to: string }
 export interface NodeFeature {
   type: 'Feature'
   geometry: { type: 'Point'; coordinates: Coord }
+
   properties: {
     id: string
     station_id?: string
     station_label?: string
     excluded_conn?: TurnBan[]
+
     /** Lines passing through a station without calling. */
     not_serving?: string[]
     [key: string]: unknown
@@ -48,6 +50,7 @@ export const readGraph = (path: string): Graph => JSON.parse(readFileSync(path, 
  *  linegraph.ts): the same key for all of a station's stops. */
 export type StationKeys = Map<string, string>
 export const readStationKeys = (path: string): StationKeys => new Map(Object.entries(JSON.parse(readFileSync(path, 'utf8'))))
+
 /** A station node's key: its stop's, or else its name. */
 export const stationKey = (keys: StationKeys, n: NodeFeature) =>
   (n.properties.station_id && keys.get(n.properties.station_id)) || `name:${n.properties.station_label}`
@@ -55,6 +58,7 @@ export const stationKey = (keys: StationKeys, n: NodeFeature) =>
 /** Adds a value to the list at a key, making the list if needed. */
 export function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V) {
   const list = map.get(key)
+
   if (list) list.push(value)
   else map.set(key, [value])
 }
@@ -68,19 +72,25 @@ export const lineIds = (e: EdgeFeature) => e.properties.lines.map((l) => l.id)
 /** Each node's edges, in the order given. */
 export function edgesByNode(edges: EdgeFeature[]) {
   const at = new Map<string, EdgeFeature[]>()
+
   for (const e of edges) for (const n of [e.properties.from, e.properties.to]) pushTo(at, n, e)
+
   return at
 }
 
 /** A line's length in metres, near enough over short distances. */
 export function length(c: Coord[]) {
   let total = 0
+
   for (let i = 1; i < c.length; i++) {
     const lat = ((c[i][1] + c[i - 1][1]) / 2) * (Math.PI / 180)
+
     total += Math.hypot((c[i][0] - c[i - 1][0]) * Math.cos(lat), c[i][1] - c[i - 1][1]) * 111_320
   }
+
   return total
 }
+
 export const edgeLength = (e: EdgeFeature) => length(e.geometry.coordinates)
 export const pathLength = (path: EdgeFeature[]) => path.reduce((sum, e) => sum + edgeLength(e), 0)
 
@@ -92,22 +102,31 @@ export interface Way { ends: [string, string]; edges: EdgeFeature[]; inner: stri
 export function waysBetween(edgesAt: Map<string, EdgeFeature[]>, isEnd: (node: string) => boolean): Way[] {
   const ways: Way[] = []
   const walked = new Set<EdgeFeature>()
+
   for (const [start, startEdges] of edgesAt) {
     if (!isEnd(start)) continue
+
     for (const first of startEdges) {
       if (walked.has(first)) continue
+
       const edges = [first], inner: string[] = []
       let at = other(first, start)
+
       while (!isEnd(at) && at !== start) {
         inner.push(at)
+
         const next = edgesAt.get(at)!.find((e) => e !== edges[edges.length - 1])!
+
         edges.push(next)
         at = other(next, at)
       }
+
       for (const e of edges) walked.add(e)
+
       ways.push({ ends: [start, at], edges, inner, length: pathLength(edges) })
     }
   }
+
   return ways
 }
 
@@ -125,22 +144,34 @@ export function search(
   follow: (e: EdgeFeature) => boolean = () => true,
 ) {
   const distance = new Map([[start, 0]]), via = new Map<string, EdgeFeature>(), done = new Set<string>()
+
   for (;;) {
     let at: string | undefined, best = Infinity
+
     for (const [n, d] of distance) if (!done.has(n) && d < best) [at, best] = [n, d]
+
     if (at === undefined) return
+
     const action = visit(at, best)
     if (action === 'give up') return
+
     if (action === 'found') {
       const path: EdgeFeature[] = []
+
       for (let n = at; n !== start;) { const e = via.get(n)!; path.unshift(e); n = other(e, n) }
+
       return { node: at, distance: best, path }
     }
+
     done.add(at)
+
     if (action === 'pass') continue
+
     for (const e of edgesAt.get(at) ?? []) {
       if (!follow(e)) continue
+
       const n = other(e, at), d = best + edgeLength(e)
+
       if (n !== at && d < (distance.get(n) ?? Infinity)) { distance.set(n, d); via.set(n, e) }
     }
   }
@@ -150,5 +181,6 @@ export function search(
 export function segmentDistance(p: number[], a: number[], b: number[]) {
   const dx = b[0] - a[0], dy = b[1] - a[1], length2 = dx * dx + dy * dy
   const t = length2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2)) : 0
+
   return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
 }

@@ -24,9 +24,12 @@ const RESTRICTIONS = ['--turn-restr-full-turn-angle', '60', '--turn-restr-full-t
 function topo(features: Feature[], distance: number): Graph {
   const args = ['-d', String(distance), '--smooth', String(SMOOTH), ...RESTRICTIONS]
   const result = spawnSync('vendor/loom/build/topo', args, { input: JSON.stringify({ type: 'FeatureCollection', features }), maxBuffer: 2 ** 31 })
+
   if (result.status !== 0) throw new Error(`topo failed: ${result.stderr}`)
+
   return JSON.parse(result.stdout.toString())
 }
+
 const edgeCount = (g: Graph) => g.features.filter(isEdge).length
 const seconds = (since: number) => Math.round((Date.now() - since) / 1000)
 
@@ -38,9 +41,11 @@ const edges = graph.features.filter(isEdge)
 // from the main line's, lost its track to Watford North. So each stop's name
 // is made its own while topo runs (`name|id`), and put back after
 const SEPARATOR = '|'
+
 const withUniqueName = (f: NodeFeature): NodeFeature => f.properties.station_label
   ? { ...f, properties: { ...f.properties, station_label: f.properties.station_label + SEPARATOR + f.properties.id } }
   : f
+
 const withName = (f: Feature): Feature => isNode(f) && f.properties.station_label?.includes(SEPARATOR)
   ? { ...f, properties: { ...f.properties, station_label: f.properties.station_label.slice(0, f.properties.station_label.lastIndexOf(SEPARATOR)) } }
   : f
@@ -54,11 +59,15 @@ function ownTrack(line: string, i: number): Feature[] {
   const own: EdgeFeature[] = edges
     .filter((e) => lineIds(e).includes(line))
     .map((e) => ({ ...e, properties: { ...e.properties, lines: e.properties.lines.filter((l) => l.id === line) } }))
+
   const ends = new Set(own.flatMap((e) => [e.properties.from, e.properties.to]))
   const started = Date.now()
   const result = topo([...[...ends].map((id) => nodes.get(id)).filter((n) => n !== undefined), ...own], LINE_MERGE)
+
   console.error(`  ${line}: ${own.length} → ${edgeCount(result)} edges, ${seconds(started)}s`)
+
   const id = (n: string) => `${i}:${n}`
+
   return result.features.map((f): Feature => isNode(f)
     ? {
         ...f,
@@ -76,5 +85,6 @@ const merged = lines.flatMap(ownTrack)
 // Then the lines together, where they share track
 const started = Date.now()
 const result = topo(merged, SHARED_MERGE)
+
 console.error(`  together: ${edgeCount(result)} edges, ${seconds(started)}s`)
 process.stdout.write(JSON.stringify({ ...result, features: result.features.map(withName) }))
