@@ -45,6 +45,9 @@ drawn over it where they share track: the Elizabeth line, London Overground
 (one orange line for all six), Thameslink, Southeastern, South Western Railway,
 Heathrow Express, Merseyrail and the Tyne and Wear Metro. See `LINES` and
 `OWN_LINES` in `src/lines.ts`, which also set each line's colour.
+Elizabeth line services that never enter its tunnel under central London,
+ending at Liverpool Street's or Paddington's surface platforms, are drawn
+as National Rail, as on TfL's map (`TUNNEL_STOPS` in `src/linegraph.ts`).
 A route's company is matched against
 `TRAIN_COMPANIES`, which lists the other names OSM uses for each. Routes of
 no known company are drawn as National Rail if tagged `network` or

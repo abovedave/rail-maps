@@ -49,6 +49,14 @@ function serviceLine(tags: Record<string, string>): string {
   return line ?? ''
 }
 
+/** Stations in the Elizabeth line's tunnel under central London. Its
+ *  services that never call at one end at Liverpool Street's or
+ *  Paddington's surface platforms, on National Rail's track, and are drawn
+ *  as National Rail, as TfL's map does: right over the tunnel, their
+ *  terminus would otherwise be merged into it (topo.ts merges a line's
+ *  tracks close together). */
+const TUNNEL_STOPS = new Set(['Paddington', 'Bond Street', 'Tottenham Court Road', 'Farringdon', 'Liverpool Street', 'Whitechapel'])
+
 /** Track trains run on: heritage, tourist and non-rail ways are left out.
  *  Track tagged as under construction is kept, as only ways in routes are
  *  used, and some are left tagged so after work on them (Whitehaven Tunnel). */
@@ -103,7 +111,7 @@ for await (const { type, id, tags, at, nodes, members } of filtered(pbf, ['r/rou
       if (tags.name) wayNames.set(id, tags.name)
     }
   } else {
-    const service = serviceLine(tags)
+    let service = serviceLine(tags)
     if (!service) continue
     const ways: number[][] = []
     const stops = new Set<number>()
@@ -112,6 +120,7 @@ for await (const { type, id, tags, at, nodes, members } of filtered(pbf, ['r/rou
       if (member.type === 'n' && member.role.startsWith('stop')) { stopNodes.add(member.id); stops.add(member.id) }
     }
     if (!stops.size) for (const n of ways.flat()) if (trackStops.has(n)) { stopNodes.add(n); stops.add(n) }
+    if (service === 'Elizabeth line' && ![...stops].some((n) => TUNNEL_STOPS.has(names.get(n) ?? ''))) service = 'National Rail'
     routes.push({ name: tags.name || `r${id}`, line: service, stops: [...stops] })
     ways.forEach((nodes, i) => {
       const used = usedPart(nodes, ways[i - 1], ways[i + 1], stops)
