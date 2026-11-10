@@ -36,8 +36,10 @@ also its own script (`npm run linegraph`, `topo`, `tidy`, `render`,
 | 6. Show | `web/map.js` with MapKit JS, or the app | the map |
 | Track graph | `src/tracks.ts`: all running track, split at junctions and the app's stations, for routing trains along real track | `out/gb.tracks.json` |
 
-`src/osm.ts` (reading the extract with osmium) and `src/geo.ts`
-(simplifying and encoding lines) are shared by the steps.
+`src/osm.ts` (reading the extract with osmium), `src/geo.ts`
+(simplifying and encoding lines) and `src/graph.ts` (the line graph's
+types, and walking and searching it) are shared by the steps.
+`npm run typecheck` checks the types.
 
 **Lines.** National Rail is one line, the base network, rather than one per
 train company. A few networks people know by name have their own line,

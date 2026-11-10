@@ -11,6 +11,7 @@
 // matches none is skipped, joining the stops either side.
 
 import { readFileSync } from 'node:fs'
+import { readGraph } from './graph.ts'
 import { services, type Route } from './routes.ts'
 
 const [routesFile, linegraphFile, mapFile] = process.argv.slice(2)
@@ -19,10 +20,7 @@ if (!routesFile || !linegraphFile || !mapFile) {
   process.exit(1)
 }
 const routes: Route[] = JSON.parse(readFileSync(routesFile, 'utf8'))
-const { nodes, runs, way } = services(
-  JSON.parse(readFileSync(mapFile, 'utf8')).features,
-  JSON.parse(readFileSync(linegraphFile, 'utf8')).features,
-)
+const { nodes, runs, way } = services(readGraph(mapFile).features, readGraph(linegraphFile).features)
 
 const label = (node: string) => nodes.get(node)?.properties.station_label ?? node
 /** Breaks, each once however many services have it: by line, then the two

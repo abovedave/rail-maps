@@ -23,6 +23,7 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { encode, encodeIntegers, fromMercator, mercX, mercY, METRES_AT_ZOOM_0, simplify } from './geo.ts'
 import { LABEL_POINTS, nameIndex, placeLabels } from './labels.ts'
+import type { Graph } from './graph.ts'
 import { LINES } from './lines.ts'
 import { darkColours, stationDots } from './stations.ts'
 import type { LatLon } from './osm.ts'
@@ -62,6 +63,7 @@ const STEPS = [
 const OVERVIEW_ORDER = [...Object.keys(LINES).filter((line) => line !== 'National Rail'), 'National Rail']
 
 const graph = readFileSync('out/gb.map.json')
+const graphJson: Graph = JSON.parse(graph.toString())
 
 /** Joins pieces of one colour whose ends meet (within `tolerance`, either
  *  way round) into longer lines, so maps have far fewer lines to draw:
@@ -120,7 +122,7 @@ function join(pieces: { colour: string; points: [number, number][] }[], toleranc
 /** Lines are named (labels.ts) in steps shown from this zoom and closer. */
 const LABELS_ZOOM = 11
 
-const stations = stationDots(graph)
+const stations = stationDots(graphJson)
 const stationPoints = stations.map((s): [number, number] => [mercX(s[1]), mercY(s[2])])
 const nameAt = nameIndex(JSON.parse(readFileSync('out/gb.names.json', 'utf8')), ([lon, lat]) => [mercX(lon), mercY(lat)])
 

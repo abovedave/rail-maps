@@ -15,7 +15,8 @@
 // metres apart.
 
 import { spawnSync } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
+import { type EdgeFeature, type Feature, type Graph, type NodeFeature, isEdge, isNode, lineIds, readGraph } from './graph.ts'
 
 /** How far apart tracks are merged, in topo's units (Web Mercator metres:
  *  about 0.6 m on the ground in Britain): a line's own, then lines'. */
@@ -24,43 +25,61 @@ const SHARED_MERGE = 80
 const SMOOTH = 50
 const RESTRICTIONS = ['--turn-restr-full-turn-angle', '60', '--turn-restr-full-turn-pen', '10000']
 
-const topo = (graph: object, args: string[]) => {
-  const result = spawnSync('vendor/loom/build/topo', [...args, ...RESTRICTIONS], { input: JSON.stringify(graph), maxBuffer: 2 ** 31 })
+function topo(features: Feature[], distance: number): Graph {
+  const args = ['-d', String(distance), '--smooth', String(SMOOTH), ...RESTRICTIONS]
+  const result = spawnSync('vendor/loom/build/topo', args, { input: JSON.stringify({ type: 'FeatureCollection', features }), maxBuffer: 2 ** 31 })
   if (result.status !== 0) throw new Error(`topo failed: ${result.stderr}`)
   return JSON.parse(result.stdout.toString())
 }
+const edgeCount = (g: Graph) => g.features.filter(isEdge).length
+const seconds = (since: number) => Math.round((Date.now() - since) / 1000)
 
-const graph = JSON.parse(readFileSync(process.argv[2], 'utf8'))
-const edges = graph.features.filter((f: any) => f.geometry.type === 'LineString')
+const graph = readGraph(process.argv[2])
+const edges = graph.features.filter(isEdge)
+
 // topo treats stations with the same name as one, and drops track between
 // them where they're apart: the Abbey Line's stop at Watford Junction, 120 m
 // from the main line's, lost its track to Watford North. So each stop's name
 // is made its own while topo runs (`name|id`), and put back after
-const unique = (f: any) => (f.properties.station_label ? { ...f, properties: { ...f.properties, station_label: `${f.properties.station_label}|${f.properties.id}` } } : f)
-const restore = (f: any) => (f.properties.station_label ? { ...f, properties: { ...f.properties, station_label: f.properties.station_label.replace(/\|[^|]*$/, '') } } : f)
-const nodes = new Map<string, any>(graph.features.filter((f: any) => f.geometry.type === 'Point').map((f: any) => [f.properties.id, unique(f)]))
-const lines = [...new Set<string>(edges.flatMap((e: any) => e.properties.lines.map((l: any) => l.id)))]
+const SEPARATOR = '|'
+const withUniqueName = (f: NodeFeature): NodeFeature => f.properties.station_label
+  ? { ...f, properties: { ...f.properties, station_label: f.properties.station_label + SEPARATOR + f.properties.id } }
+  : f
+const withName = (f: Feature): Feature => isNode(f) && f.properties.station_label?.includes(SEPARATOR)
+  ? { ...f, properties: { ...f.properties, station_label: f.properties.station_label.slice(0, f.properties.station_label.lastIndexOf(SEPARATOR)) } }
+  : f
 
-// Each line merged on its own, with node ids kept apart between lines
-const merged = lines.flatMap((line, i) => {
-  const own = edges
-    .filter((e: any) => e.properties.lines.some((l: any) => l.id === line))
-    .map((e: any) => ({ ...e, properties: { ...e.properties, lines: e.properties.lines.filter((l: any) => l.id === line) } }))
-  const ends = new Set(own.flatMap((e: any) => [e.properties.from, e.properties.to]))
+const nodes = new Map(graph.features.filter(isNode).map((f) => [f.properties.id, withUniqueName(f)]))
+const lines = [...new Set(edges.flatMap(lineIds))]
+
+/** A line's own track, merged on its own, its node ids made its own
+ *  (`2:n123`) so lines' nodes stay apart until they're merged together. */
+function ownTrack(line: string, i: number): Feature[] {
+  const own: EdgeFeature[] = edges
+    .filter((e) => lineIds(e).includes(line))
+    .map((e) => ({ ...e, properties: { ...e.properties, lines: e.properties.lines.filter((l) => l.id === line) } }))
+  const ends = new Set(own.flatMap((e) => [e.properties.from, e.properties.to]))
   const started = Date.now()
-  const result = topo({ type: 'FeatureCollection', features: [...[...ends].map((id) => nodes.get(id)).filter(Boolean), ...own] },
-    ['-d', String(LINE_MERGE), '--smooth', String(SMOOTH)])
-  console.error(`  ${line}: ${own.length} → ${result.features.filter((f: any) => f.geometry.type === 'LineString').length} edges, ${Math.round((Date.now() - started) / 1000)}s`)
+  const result = topo([...[...ends].map((id) => nodes.get(id)).filter((n) => n !== undefined), ...own], LINE_MERGE)
+  console.error(`  ${line}: ${own.length} → ${edgeCount(result)} edges, ${seconds(started)}s`)
   const id = (n: string) => `${i}:${n}`
-  return result.features.map((f: any) => f.geometry.type === 'Point'
-    ? { ...f, properties: { ...f.properties, id: id(f.properties.id), excluded_conn: f.properties.excluded_conn?.map((c: any) => ({ ...c, node_from: id(c.node_from), node_to: id(c.node_to) })) } }
+  return result.features.map((f): Feature => isNode(f)
+    ? {
+        ...f,
+        properties: {
+          ...f.properties,
+          id: id(f.properties.id),
+          excluded_conn: f.properties.excluded_conn?.map((c) => ({ ...c, node_from: id(c.node_from), node_to: id(c.node_to) })),
+        },
+      }
     : { ...f, properties: { ...f.properties, from: id(f.properties.from), to: id(f.properties.to) } })
-})
+}
 
-if (process.argv[3]) writeFileSync(process.argv[3], JSON.stringify({ type: 'FeatureCollection', features: merged.filter((f: any) => f.geometry.type === 'LineString') }))
+const merged = lines.flatMap(ownTrack)
+if (process.argv[3]) writeFileSync(process.argv[3], JSON.stringify({ type: 'FeatureCollection', features: merged.filter(isEdge) }))
 
 // Then the lines together, where they share track
 const started = Date.now()
-const result = topo({ type: 'FeatureCollection', features: merged }, ['-d', String(SHARED_MERGE), '--smooth', String(SMOOTH)])
-console.error(`  together: ${result.features.filter((f: any) => f.geometry.type === 'LineString').length} edges, ${Math.round((Date.now() - started) / 1000)}s`)
-process.stdout.write(JSON.stringify({ ...result, features: result.features.map(restore) }))
+const result = topo(merged, SHARED_MERGE)
+console.error(`  together: ${edgeCount(result)} edges, ${seconds(started)}s`)
+process.stdout.write(JSON.stringify({ ...result, features: result.features.map(withName) }))

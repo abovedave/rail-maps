@@ -10,10 +10,10 @@
 // - short ways back to where they started are removed
 // - station-free bypasses are removed: a way between two junctions or
 //   stations, with no stations along it (ways end at stations), whose lines
-//   all also run on another route between its ends that's
-//   close by and about as long (the Redhill avoiding line, or fast lines
-//   splitting from slow for a few kilometres), so lines are drawn once, along
-//   the route with the stations
+//   all also run on another route between its ends that's close by and
+//   about as long (the Redhill avoiding line, or fast lines splitting from
+//   slow for a few kilometres), so lines are drawn once, along the route
+//   with the stations
 //
 // repeated until none changes anything. Then, given the services (routes.json
 // and linegraph.json, from linegraph.ts), turn restrictions topo inferred
@@ -24,6 +24,10 @@
 //   node src/tidy.ts topo.json [routes.json linegraph.json] > tidy.json
 
 import { readFileSync } from 'node:fs'
+import {
+  type Coord, type EdgeFeature, type Line, type NodeFeature, type TurnBan, type Way,
+  edgeLength, edgesByNode, isNode, length, lineIds, other, pathLength, pushTo, readGraph, search, segmentDistance, waysBetween,
+} from './graph.ts'
 import { services, type Route } from './routes.ts'
 
 /** Junctions joined by a track shorter than this, in metres, become one. */
@@ -50,62 +54,59 @@ const MIN_BYPASS = 500
 const BYPASS_APART = 500
 const BYPASS_RATIO = 1.3
 
-const graph = JSON.parse(readFileSync(process.argv[2], 'utf8'))
-const nodes = new Map<string, any>()
-let edges: any[] = []
-for (const f of graph.features) f.geometry.type === 'Point' ? nodes.set(f.properties.id, f) : edges.push(f)
+// MARK: The graph, changed in place
 
-const metres = (c: [number, number][]) => {
-  let total = 0
-  for (let i = 1; i < c.length; i++) {
-    const lat = ((c[i][1] + c[i - 1][1]) / 2) * (Math.PI / 180)
-    total += Math.hypot((c[i][0] - c[i - 1][0]) * Math.cos(lat), c[i][1] - c[i - 1][1]) * 111_320
-  }
-  return total
-}
-const linesOf = (e: any) => e.properties.lines.map((l: any) => l.id).sort().join('|')
-const other = (e: any, n: string) => (e.properties.from === n ? e.properties.to : e.properties.from)
+const graph = readGraph(process.argv[2])
+const nodes = new Map<string, NodeFeature>()
+let edges: EdgeFeature[] = []
+for (const f of graph.features) isNode(f) ? nodes.set(f.properties.id, f) : edges.push(f)
+
+let edgesAt = new Map<string, EdgeFeature[]>()
+const index = () => { edgesAt = edgesByNode(edges) }
+
+const node = (id: string) => nodes.get(id)!
+const isStation = (n: string) => Boolean(nodes.get(n)?.properties.station_id)
+/** A node where ways start and end: a junction, an end of a line, or a station. */
+const isEnd = (n: string) => edgesAt.get(n)?.length !== 2 || isStation(n)
+const linesKey = (e: EdgeFeature) => lineIds(e).sort().join('|')
+const banned = (bans: TurnBan[] | undefined, line: string, a: string, b: string) => (bans ?? []).some((c) =>
+  c.line === line && ((c.node_from === a && c.node_to === b) || (c.node_from === b && c.node_to === a)))
+/** Whether a line can go between two neighbours through a junction. */
+const allowed = (n: string, line: string, x: string, y: string) => !banned(node(n).properties.excluded_conn, line, x, y)
+
+// MARK: Joining nodes
+
 /** A line with its start moved, the move easing out along it over EASE (or
  *  most of the line, if shorter), with points added so the bend is smooth. */
-function moveStart(c: [number, number][], to: number[]): [number, number][] {
+function moveStart(c: Coord[], to: Coord): Coord[] {
   const [dx, dy] = [to[0] - c[0][0], to[1] - c[0][1]]
-  const ease = Math.min(EASE, metres(c) * 0.9)
+  const ease = Math.min(EASE, length(c) * 0.9)
   if (!ease) return [[to[0], to[1]], ...c.slice(1)]
   // Points every 20 m over the eased part
-  const dense: [number, number][] = [c[0]]
+  const dense: Coord[] = [c[0]]
   for (let i = 1; i < c.length; i++) {
-    const steps = Math.min(50, Math.ceil(metres([c[i - 1], c[i]]) / 20))
-    for (let k = 1; k <= steps; k++) dense.push([c[i - 1][0] + ((c[i][0] - c[i - 1][0]) * k) / steps, c[i - 1][1] + ((c[i][1] - c[i - 1][1]) * k) / steps])
+    const steps = Math.min(50, Math.ceil(length([c[i - 1], c[i]]) / 20))
+    for (let k = 1; k <= steps; k++) {
+      dense.push([c[i - 1][0] + ((c[i][0] - c[i - 1][0]) * k) / steps, c[i - 1][1] + ((c[i][1] - c[i - 1][1]) * k) / steps])
+    }
   }
   let along = 0
   return dense.map((p, i) => {
-    if (i) along += metres([dense[i - 1], p])
+    if (i) along += length([dense[i - 1], p])
     const weight = along >= ease ? 0 : (1 + Math.cos((Math.PI * along) / ease)) / 2
     return [p[0] + dx * weight, p[1] + dy * weight]
   })
 }
-const isStation = (n: string) => Boolean(nodes.get(n)?.properties.station_id)
-
-let edgesAt = new Map<string, any[]>()
-const index = () => {
-  edgesAt = new Map()
-  for (const e of edges) for (const n of [e.properties.from, e.properties.to]) (edgesAt.get(n) ?? edgesAt.set(n, []).get(n)!).push(e)
-}
-
-/** Whether a line can go between two neighbours through a junction. */
-const allowed = (n: string, line: string, x: string, y: string) =>
-  !(nodes.get(n).properties.excluded_conn ?? []).some((c: any) => c.line === line
-    && ((c.node_from === x && c.node_to === y) || (c.node_from === y && c.node_to === x)))
 
 /** The turn restrictions of junctions a and b joined into one, by the track
- *  e between them: a line can go between two of their tracks only as it
- *  could before, at the same junction, or from one to the other along e. */
-function joinedRestrictions(e: any, a: string, b: string) {
-  // Lines can go between them along any track joining them, not just e
+ *  between them: a line can go between two of their tracks only as it
+ *  could before, at the same junction, or from one to the other along a
+ *  track joining them. */
+function joinedRestrictions(a: string, b: string): TurnBan[] {
   const links = edgesAt.get(a)!.filter((x) => other(x, a) === b)
-  const link = new Set(links.flatMap((x) => x.properties.lines.map((l: any) => l.id)))
-  const tracks = [a, b].flatMap((at) => edgesAt.get(at)!.filter((x) => !links.includes(x))
-    .map((x) => ({ at, to: other(x, at), lines: new Set<string>(x.properties.lines.map((l: any) => l.id)) })))
+  const linkLines = new Set(links.flatMap(lineIds))
+  const tracks = [a, b]
+    .flatMap((at) => edgesAt.get(at)!.filter((x) => !links.includes(x)).map((x) => ({ at, to: other(x, at), lines: new Set(lineIds(x)) })))
     .filter((t) => t.to !== a && t.to !== b)
   // Restrictions name neighbours, not tracks, so a turn between two is
   // allowed if it was along any of the tracks to them
@@ -117,7 +118,7 @@ function joinedRestrictions(e: any, a: string, b: string) {
         if (!q.lines.has(line)) continue
         const ok = p.at === q.at
           ? allowed(p.at, line, p.to, q.to)
-          : link.has(line) && allowed(p.at, line, p.to, q.at) && allowed(q.at, line, p.at, q.to)
+          : linkLines.has(line) && allowed(p.at, line, p.to, q.at) && allowed(q.at, line, p.at, q.to)
         const key = [line, ...[p.to, q.to].sort()].join(' ')
         const turn = turns.get(key)
         if (turn) turn.ok ||= ok
@@ -131,20 +132,20 @@ function joinedRestrictions(e: any, a: string, b: string) {
 
 /** Joins node b into node a along the track e between them, a moving to
  *  `at`, the tracks meeting either easing into where it's moved to. */
-function join(e: any, a: string, b: string, at: number[]) {
-  const conns = joinedRestrictions(e, a, b)
+function join(e: EdgeFeature, a: string, b: string, at: Coord) {
+  const bans = joinedRestrictions(a, b)
   // A line calls at stops joined into one if it called at either
-  const calling = (n: string) => {
-    const not = new Set<string>(nodes.get(n).properties.not_serving ?? [])
-    return edgesAt.get(n)!.flatMap((x) => x.properties.lines.map((l: any) => l.id)).filter((l: string) => !not.has(l))
-  }
   if (isStation(a) && isStation(b)) {
+    const calling = (n: string) => {
+      const not = new Set(node(n).properties.not_serving ?? [])
+      return edgesAt.get(n)!.flatMap(lineIds).filter((l) => !not.has(l))
+    }
     const calls = new Set([...calling(a), ...calling(b)])
-    const not = [...new Set([...(nodes.get(a).properties.not_serving ?? []), ...(nodes.get(b).properties.not_serving ?? [])])].filter((l) => !calls.has(l))
-    if (not.length) nodes.get(a).properties.not_serving = not
-    else delete nodes.get(a).properties.not_serving
+    const not = [...new Set([...(node(a).properties.not_serving ?? []), ...(node(b).properties.not_serving ?? [])])].filter((l) => !calls.has(l))
+    if (not.length) node(a).properties.not_serving = not
+    else delete node(a).properties.not_serving
   }
-  nodes.get(a).geometry.coordinates = at
+  node(a).geometry.coordinates = at
   edges = edges.filter((x) => x !== e)
   for (const x of edges) {
     for (const end of ['from', 'to'] as const) {
@@ -155,7 +156,7 @@ function join(e: any, a: string, b: string, at: number[]) {
       }
     }
   }
-  nodes.get(a).properties.excluded_conn = conns
+  node(a).properties.excluded_conn = bans
   nodes.delete(b)
   for (const n of nodes.values()) {
     for (const c of n.properties.excluded_conn ?? []) {
@@ -171,13 +172,12 @@ function join(e: any, a: string, b: string, at: number[]) {
  *  their middle. Stations are left where they are. */
 function joinJunctions() {
   let joined = 0
-  for (const e of [...edges].sort((a, b) => metres(a.geometry.coordinates) - metres(b.geometry.coordinates))) {
+  for (const e of [...edges].sort((x, y) => edgeLength(x) - edgeLength(y))) {
     const { from: a, to: b } = e.properties
     if (a === b || !edgesAt.get(a)?.includes(e)) continue
     if (isStation(a) || isStation(b) || edgesAt.get(a)!.length < 3 || edgesAt.get(b)!.length < 3) continue
-    if (metres(e.geometry.coordinates) >= MIN_TRACK) break
-    // b becomes a, half way between them
-    const [ax, ay] = nodes.get(a).geometry.coordinates, [bx, by] = nodes.get(b).geometry.coordinates
+    if (edgeLength(e) >= MIN_TRACK) break
+    const [ax, ay] = node(a).geometry.coordinates, [bx, by] = node(b).geometry.coordinates
     join(e, a, b, [(ax + bx) / 2, (ay + by) / 2])
     joined++
   }
@@ -193,49 +193,39 @@ function joinJunctions() {
  *  line, deep under the Overground's) are left apart. */
 function joinStops() {
   const name = (n: string) => nodes.get(n)?.properties.station_label
-  const lines = (n: string) => new Set(edgesAt.get(n)!.flatMap((x) => x.properties.lines.map((l: any) => l.id))).size
+  const lineCount = (n: string) => new Set(edgesAt.get(n)!.flatMap(lineIds)).size
   /** Where lines end: a stop with one track. */
   const isTerminus = (n: string) => edgesAt.get(n)?.length === 1
   /** The track from a stop to the nearest other stop of its name, within
    *  MAX_STOP_LINK (MAX_TERMINUS_LINK between termini), through junctions
    *  only. */
-  function link(start: string): { to: string; path: any[] } | undefined {
+  const link = (start: string) => {
     const limit = isTerminus(start) ? MAX_TERMINUS_LINK : MAX_STOP_LINK
-    const distance = new Map([[start, 0]]), via = new Map<string, any>(), settled = new Set<string>()
-    for (;;) {
-      let at: string | undefined, best = Infinity
-      for (const [n, d] of distance) if (!settled.has(n) && d < best) [at, best] = [n, d]
-      if (at === undefined || best >= limit) return
-      settled.add(at)
-      if (at !== start && isStation(at)) {
-        if (name(at) !== name(start)) continue
-        if (best >= MAX_STOP_LINK && !isTerminus(at)) continue
-        const path: any[] = []
-        for (let n = at; n !== start;) { const e = via.get(n); path.unshift(e); n = other(e, n) }
-        return { to: at, path }
-      }
-      for (const e of edgesAt.get(at) ?? []) {
-        const n = other(e, at), d = best + metres(e.geometry.coordinates)
-        if (n !== at && d < (distance.get(n) ?? Infinity)) { distance.set(n, d); via.set(n, e) }
-      }
-    }
+    return search(start, edgesAt, (at, distance) => {
+      if (distance >= limit) return 'give up'
+      if (at === start || !isStation(at)) return 'go on'
+      if (name(at) !== name(start)) return 'pass'
+      if (distance >= MAX_STOP_LINK && !isTerminus(at)) return 'pass'
+      return 'found'
+    })
   }
-  const length = (path: any[]) => path.reduce((sum, e) => sum + metres(e.geometry.coordinates), 0)
   let joined = 0
   for (let found = true; found;) {
     found = false
     // Nearest first, so a station comes together where most of its
     // platforms are
-    const pairs = [...edgesAt.keys()].filter(isStation).map((stop) => ({ stop, linked: link(stop) }))
-      .filter((p) => p.linked).sort((a, b) => length(a.linked!.path) - length(b.linked!.path))
+    const pairs = [...edgesAt.keys()].filter(isStation)
+      .map((stop) => ({ stop, linked: link(stop) }))
+      .filter((p) => p.linked)
+      .sort((x, y) => pathLength(x.linked!.path) - pathLength(y.linked!.path))
     for (const { stop } of pairs) {
       if (!edgesAt.has(stop)) continue
       const linked = link(stop)
       if (!linked) continue
       // Into the stop with the most lines, along the track between
-      const [keep, start] = lines(stop) >= lines(linked.to) ? [stop, linked.path] : [linked.to, [...linked.path].reverse()]
-      const at = nodes.get(keep).geometry.coordinates
-      for (const e of start) {
+      const [keep, path] = lineCount(stop) >= lineCount(linked.node) ? [stop, linked.path] : [linked.node, [...linked.path].reverse()]
+      const at = node(keep).geometry.coordinates
+      for (const e of path) {
         if (!edges.includes(e)) continue
         const { from, to } = e.properties
         if (from === to) continue
@@ -248,166 +238,116 @@ function joinStops() {
   return joined
 }
 
+// MARK: Merging parallel ways
+
+type LinedWay = Way & { lines: Line[] }
+
 /** The turn restrictions at one end of ways merged into `kept`: each line
  *  can turn from it as it could from any of them. */
-function carryTurns(end: string, kept: any, merged: any[]) {
-  const node = nodes.get(end)
-  if (!node?.properties.excluded_conn) return
-  const next = (way: any) => other(way.edges.find((e: any) => e.properties.from === end || e.properties.to === end), end)
+function carryTurns(end: string, kept: LinedWay, merged: LinedWay[]) {
+  const bans = nodes.get(end)?.properties.excluded_conn
+  if (!bans) return
+  /** The way's next node from this end. */
+  const next = (way: Way) => other(way.edges.find((e) => e.properties.from === end || e.properties.to === end)!, end)
   const k = next(kept)
-  const has = (way: any, line: string) => way.lines.some((l: any) => l.id === line)
-  const excluded = (line: string, a: string, b: string) => node.properties.excluded_conn.some((c: any) => c.line === line
-    && ((c.node_from === a && c.node_to === b) || (c.node_from === b && c.node_to === a)))
-  const conns: any[] = []
-  for (const c of node.properties.excluded_conn) {
+  const has = (way: LinedWay, line: string) => way.lines.some((l) => l.id === line)
+  const carried: TurnBan[] = []
+  for (const c of bans) {
     const x = c.node_from === k ? c.node_to : c.node_to === k ? c.node_from : undefined
     // A line kept from turning off `kept` can if it could from a merged way
-    if (x !== undefined && merged.some((way) => has(way, c.line) && !excluded(c.line, next(way), x))) continue
-    conns.push(c)
+    if (x !== undefined && merged.some((way) => has(way, c.line) && !banned(bans, c.line, next(way), x))) continue
+    carried.push(c)
   }
   // A line new to `kept` can't turn where it couldn't from its merged ways
   for (const way of merged) {
     const d = next(way)
-    for (const c of node.properties.excluded_conn) {
+    for (const c of bans) {
       if (has(kept, c.line) || (c.node_from !== d && c.node_to !== d)) continue
-      conns.push({ ...c, node_from: c.node_from === d ? k : c.node_from, node_to: c.node_to === d ? k : c.node_to })
+      carried.push({ ...c, node_from: c.node_from === d ? k : c.node_from, node_to: c.node_to === d ? k : c.node_to })
     }
   }
-  node.properties.excluded_conn = conns
+  node(end).properties.excluded_conn = carried
 }
 
 /** Of short ways of about the same length between the same two points,
- *  keeps the shortest, carrying all their lines. */
+ *  keeps the shortest, carrying all their lines. Removes short loops. */
 function mergeParallel() {
-  // Where ways start and end: junctions, ends and stations
-  const isEnd = (n: string) => edgesAt.get(n)?.length !== 2 || isStation(n)
-  const ways = new Map<string, { ends: string[]; lines: any[]; edges: any[]; inner: string[]; length: number }[]>()
-  const walked = new Set<any>()
-  const loops: any[][] = []
-  for (const start of edgesAt.keys()) {
-    if (!isEnd(start)) continue
-    for (const first of edgesAt.get(start)!) {
-      if (walked.has(first)) continue
-      const way: any[] = [first], inner: string[] = []
-      let at = other(first, start)
-      while (!isEnd(at) && at !== start) {
-        inner.push(at)
-        const next = edgesAt.get(at)!.find((e) => e !== way[way.length - 1])!
-        way.push(next)
-        at = other(next, at)
-      }
-      for (const e of way) walked.add(e)
-      // A short way back to where it started goes nowhere: a loop
-      if (start === at) {
-        const length = way.reduce((sum, e) => sum + metres(e.geometry.coordinates), 0)
-        if (length <= MAX_LENGTH) { loops.push(way); for (const n of inner) nodes.delete(n) }
-        continue
-      }
-      if (new Set(way.map(linesOf)).size !== 1) continue
-      const ends = [start, at].sort().join(' ')
-      ;(ways.get(ends) ?? ways.set(ends, []).get(ends)!).push({
-        ends: [start, at], lines: way[0].properties.lines, edges: way, inner, length: way.reduce((sum, e) => sum + metres(e.geometry.coordinates), 0),
-      })
+  const byEnds = new Map<string, LinedWay[]>()
+  const loops: Way[] = []
+  for (const way of waysBetween(edgesAt, isEnd)) {
+    const [start, end] = way.ends
+    if (start === end) {
+      if (way.length <= MAX_LENGTH) loops.push(way)
+      continue
     }
+    if (new Set(way.edges.map(linesKey)).size !== 1) continue
+    const key = [start, end].sort().join(' ')
+    pushTo(byEnds, key, { ...way, lines: way.edges[0].properties.lines })
   }
-  const merges = [...ways.values()].filter((group) => group.length > 1
+  const merges = [...byEnds.values()].filter((group) => group.length > 1
     && Math.max(...group.map((w) => w.length)) <= Math.min(MAX_LENGTH, Math.min(...group.map((w) => w.length)) * LENGTH_RATIO))
-  const dropped = new Set<any>()
+  const dropped = new Set<EdgeFeature>()
   for (const group of merges) {
-    group.sort((a, b) => a.length - b.length)
-    const lines = new Map<string, any>()
+    group.sort((x, y) => x.length - y.length)
+    const [kept, ...rest] = group
+    const lines = new Map<string, Line>()
     for (const way of group) for (const l of way.lines) lines.set(l.id, l)
-    for (const end of group[0].ends) carryTurns(end, group[0], group.slice(1))
-    for (const e of group[0].edges) e.properties.lines = [...lines.values()]
-    for (const way of group.slice(1)) {
+    for (const end of kept.ends) carryTurns(end, kept, rest)
+    for (const e of kept.edges) e.properties.lines = [...lines.values()]
+    for (const way of rest) {
       for (const e of way.edges) dropped.add(e)
       for (const n of way.inner) nodes.delete(n)
     }
   }
-  for (const loop of loops) for (const e of loop) dropped.add(e)
+  for (const loop of loops) {
+    for (const e of loop.edges) dropped.add(e)
+    for (const n of loop.inner) nodes.delete(n)
+  }
   edges = edges.filter((e) => !dropped.has(e))
   index()
   return merges.length + loops.length
+}
+
+// MARK: Removing bypasses
+
+/** Metres east and north near a point, for how far apart two routes are. */
+const flat = ([lon, lat]: Coord) => [lon * 111_320 * Math.cos((lat * Math.PI) / 180), lat * 110_540]
+
+/** The shortest route between a way's ends, not along it, on track that
+ *  carries all its lines, if it's about as long and close by all along. */
+function alternative(way: Way) {
+  const [a, b] = way.ends
+  const lines = [...new Set(way.edges.flatMap(lineIds))]
+  const carries = (e: EdgeFeature) => !way.edges.includes(e) && lines.every((id) => lineIds(e).includes(id))
+  const longest = way.length * BYPASS_RATIO
+  const found = search(a, edgesAt, (at, distance) => (at === b ? 'found' : distance > longest ? 'give up' : 'go on'), carries)
+  if (!found || found.distance > longest || found.distance * BYPASS_RATIO < way.length) return
+  const route = [...found.path].reverse()
+  const segments = route.flatMap((e) => {
+    const c = e.geometry.coordinates.map(flat)
+    return c.slice(1).map((q, i) => [c[i], q])
+  })
+  const near = (point: Coord) => segments.some(([s, t]) => segmentDistance(flat(point), s, t) <= BYPASS_APART)
+  if (!way.edges.every((e) => e.geometry.coordinates.every(near))) return
+  return { length: found.distance, stations: route.flatMap((e) => [e.properties.from, e.properties.to]).filter(isStation) }
 }
 
 /** Removes station-free bypasses (see the top of this file), the longest
  *  first, one at a time, so of two that are each other's alternative only
  *  one goes. Logs each one removed. */
 function dropBypasses() {
-  // Flat metres near a point, for how far apart two routes are
-  const flat = ([lon, lat]: [number, number]) => [lon * 111_320 * Math.cos((lat * Math.PI) / 180), lat * 110_540]
-  const apart = (p: number[], a: number[], b: number[]) => {
-    const dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy
-    const t = len2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2)) : 0
-    return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
-  }
-  const isEnd = (n: string) => edgesAt.get(n)?.length !== 2 || isStation(n)
-  /** Ways between ends: junctions, ends of lines and stations. */
-  function ways() {
-    const found: { ends: [string, string]; edges: any[]; inner: string[]; length: number }[] = []
-    const walked = new Set<any>()
-    for (const start of edgesAt.keys()) {
-      if (!isEnd(start)) continue
-      for (const first of edgesAt.get(start)!) {
-        if (walked.has(first)) continue
-        const way: any[] = [first], inner: string[] = []
-        let at = other(first, start)
-        while (!isEnd(at) && at !== start) {
-          inner.push(at)
-          const next = edgesAt.get(at)!.find((e) => e !== way[way.length - 1])!
-          way.push(next)
-          at = other(next, at)
-        }
-        for (const e of way) walked.add(e)
-        if (at !== start) found.push({ ends: [start, at], edges: way, inner, length: way.reduce((sum, e) => sum + metres(e.geometry.coordinates), 0) })
-      }
-    }
-    return found
-  }
-  /** The shortest route between a way's ends, not along it, on track that
-   *  carries all its lines, if one's about as long and close by. */
-  function alternative(way: ReturnType<typeof ways>[number]) {
-    const [a, b] = way.ends
-    const lines = [...new Set<string>(way.edges.flatMap((e) => e.properties.lines.map((l: any) => l.id)))]
-    const carries = (e: any) => !way.edges.includes(e) && lines.every((id) => e.properties.lines.some((l: any) => l.id === id))
-    const longest = way.length * BYPASS_RATIO
-    const distance = new Map([[a, 0]]), via = new Map<string, any>(), settled = new Set<string>()
-    for (;;) {
-      let at: string | undefined, best = Infinity
-      for (const [n, d] of distance) if (!settled.has(n) && d < best) [at, best] = [n, d]
-      if (at === undefined || at === b || best > longest) break
-      settled.add(at)
-      for (const e of edgesAt.get(at)!) {
-        if (!carries(e)) continue
-        const next = other(e, at), d = best + metres(e.geometry.coordinates)
-        if (d < (distance.get(next) ?? Infinity)) { distance.set(next, d); via.set(next, e) }
-      }
-    }
-    const length = distance.get(b)
-    if (length === undefined || length > longest || length * BYPASS_RATIO < way.length) return
-    const route: any[] = []
-    for (let n = b; n !== a;) { const e = via.get(n); route.push(e); n = other(e, n) }
-    const segments = route.flatMap((e) => { const c = e.geometry.coordinates.map(flat); return c.slice(1).map((q: number[], i: number) => [c[i], q]) })
-    for (const e of way.edges) {
-      for (const point of e.geometry.coordinates) {
-        const p = flat(point)
-        if (!segments.some(([s, t]: number[][]) => apart(p, s, t) <= BYPASS_APART)) return
-      }
-    }
-    return { length, stations: route.flatMap((e) => [e.properties.from, e.properties.to]).filter(isStation) }
-  }
-
   let dropped = 0
   for (;;) {
-    const bypasses = ways()
+    const bypasses = waysBetween(edgesAt, isEnd)
       .filter((w) => w.ends[0] !== w.ends[1] && w.length >= MIN_BYPASS)
       .sort((x, y) => y.length - x.length)
-    let way, alt
+    let way: Way | undefined, alt: ReturnType<typeof alternative>
     for (const w of bypasses) if ((alt = alternative(w))) { way = w; break }
     if (!way || !alt) break
     const [lon, lat] = way.edges[Math.floor(way.edges.length / 2)].geometry.coordinates[0]
-    const names = [...new Set(alt.stations.map((n: string) => nodes.get(n).properties.station_label))]
-    console.error(`  bypass at ${lat.toFixed(4)},${lon.toFixed(4)}: ${Math.round(way.length)} m, removed for ${Math.round(alt.length)} m${names.length ? ` via ${names.join(', ')}` : ''} (${[...new Set(way.edges.flatMap((e) => e.properties.lines.map((l: any) => l.id)))].join(', ')})`)
+    const names = [...new Set(alt.stations.map((n) => node(n).properties.station_label))]
+    const lines = [...new Set(way.edges.flatMap(lineIds))]
+    console.error(`  bypass at ${lat.toFixed(4)},${lon.toFixed(4)}: ${Math.round(way.length)} m, removed for ${Math.round(alt.length)} m${names.length ? ` via ${names.join(', ')}` : ''} (${lines.join(', ')})`)
     edges = edges.filter((e) => !way.edges.includes(e))
     for (const n of way.inner) nodes.delete(n)
     index()
@@ -415,6 +355,8 @@ function dropBypasses() {
   }
   return dropped
 }
+
+// MARK: Run
 
 index()
 let joined = 0, stops = 0, merged = 0, bypasses = 0
@@ -431,40 +373,30 @@ for (let round = 0; round < 10; round++) {
 // where only two tracks meet: a line on both runs on through (as track
 // does), or loom orders it differently either side and it's drawn broken
 // (Caledonian Road & Barnsbury, where tidying left a junction with two)
-const neighbours = new Map<string, Set<string>>()
-const tracks = new Map<string, number>()
-for (const e of edges) {
-  const { from, to } = e.properties
-  ;(neighbours.get(from) ?? neighbours.set(from, new Set()).get(from)!).add(to)
-  ;(neighbours.get(to) ?? neighbours.set(to, new Set()).get(to)!).add(from)
-  for (const n of [from, to]) tracks.set(n, (tracks.get(n) ?? 0) + 1)
-}
 let unblocked = 0
-const kept = [...nodes.values()].filter((n) => neighbours.has(n.properties.id)).map((n) => {
-  const near = neighbours.get(n.properties.id)!
-  const through = tracks.get(n.properties.id) === 2
+const kept = [...nodes.values()].filter((n) => edgesAt.has(n.properties.id)).map((n) => {
+  const near = new Set(edgesAt.get(n.properties.id)!.map((e) => other(e, n.properties.id)))
+  const through = edgesAt.get(n.properties.id)!.length === 2
   if (through && n.properties.excluded_conn?.length) unblocked++
-  const conns = n.properties.excluded_conn?.filter((c: any) => !through && near.has(c.node_from) && near.has(c.node_to))
-  return conns ? { ...n, properties: { ...n.properties, excluded_conn: conns } } : n
+  const bans = n.properties.excluded_conn?.filter((c) => !through && near.has(c.node_from) && near.has(c.node_to))
+  return bans ? { ...n, properties: { ...n.properties, excluded_conn: bans } } : n
 })
 
 // Turns services make that topo didn't allow
 let lifted = 0
 if (process.argv[3] && process.argv[4]) {
   const routes: Route[] = JSON.parse(readFileSync(process.argv[3], 'utf8'))
-  const { nodes: byId, runs, way } = services([...kept, ...edges], JSON.parse(readFileSync(process.argv[4], 'utf8')).features)
+  const { nodes: byId, runs, way } = services([...kept, ...edges], readGraph(process.argv[4]).features)
   for (const run of runs(routes).runs) {
     if (way(run)) continue
     const turns = way(run, true)
     if (!turns) continue
     const line = run.route.line
     for (let i = 1; i < turns.length - 1; i++) {
-      const node = byId.get(turns[i])
-      const [a, b] = [turns[i - 1], turns[i + 1]]
-      const before = node.properties.excluded_conn?.length ?? 0
-      node.properties.excluded_conn = node.properties.excluded_conn?.filter((c: any) =>
-        !(c.line === line && ((c.node_from === a && c.node_to === b) || (c.node_from === b && c.node_to === a))))
-      if ((node.properties.excluded_conn?.length ?? 0) < before) lifted++
+      const n = byId.get(turns[i])!
+      const before = n.properties.excluded_conn?.length ?? 0
+      n.properties.excluded_conn = n.properties.excluded_conn?.filter((c) => !banned([c], line, turns[i - 1], turns[i + 1]))
+      if ((n.properties.excluded_conn?.length ?? 0) < before) lifted++
     }
   }
 }

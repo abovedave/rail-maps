@@ -11,6 +11,7 @@
 // Sizes are screen points at the zoom a drawing is drawn for, measured half
 // a zoom further out, where it's first shown and things are closest.
 
+import { segmentDistance } from './graph.ts'
 import { LINES } from './lines.ts'
 
 /** Text size, and roughly how wide a character is, in points. */
@@ -61,12 +62,6 @@ export function nameIndex(names: [string, string, Vec[]][], toMercator: (p: Vec)
     }
     return best
   }
-}
-
-function segmentDistance(p: Vec, a: Vec, b: Vec) {
-  const dx = b[0] - a[0], dy = b[1] - a[1], length2 = dx * dx + dy * dy
-  const t = length2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2)) : 0
-  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
 }
 
 /** Names for one drawing's lines (Web Mercator metres), as [text, colour,

@@ -19,9 +19,14 @@
     "preview": "vendor/loom/build/transitmap -l --line-width 6 --line-spacing 3 --station-label-textsize 30 < out/gb.map.json > out/gb.svg",
     "tracks": "node src/tracks.ts vendor/osm/great-britain-latest.osm.pbf ../app/api/public/stations.json > out/gb.tracks.json",
     "app": "cp out/gb.transit.json ../app/Public/transit.json && cp out/gb.tracks.json ../app/Public/tracks.json",
-    "web": "node --env-file=.env src/serve.ts"
+    "web": "node --env-file=.env src/serve.ts",
+    "typecheck": "tsc"
   },
   "engines": {
     "node": ">=24"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
   }
 }
