@@ -7,8 +7,8 @@
 // Maps draw the lines themselves, side by side where they share track, from
 // the ordered line graph (see lineGraph, and web/bundles.js): pitchPoints
 // apart (centre to centre) at zoom 14, doubling every two levels in and
-// halving every two out, but never closer than minPitchPoints; two thirds of
-// that wide, up to 3 points. Line names are placed here for each zoom step,
+// halving every two out, but never closer than minPitchPoints; linePoints of
+// pitchPoints of that wide, up to 3 points. Line names are placed here for each zoom step,
 // along the track, with the side their line is drawn on.
 //
 // The file: { linePoints, pitchPoints, minPitchPoints, labelPoints,
@@ -29,9 +29,9 @@ import { darkColours, stationDots } from './lib/stations.ts'
 
 /** Lines' width, and the space between them, in screen points at zoom 14,
  *  and the least space between them further out. */
-const LINE_POINTS = 2
-const PITCH_POINTS = 3
-const MIN_PITCH_POINTS = 2.5
+const LINE_POINTS = 1.75
+const PITCH_POINTS = 3.5
+const MIN_PITCH_POINTS = 3
 /** Line names are placed for each step from its first zoom, for the zoom
  *  it's placed for. */
 const NAME_STEPS = [{ zoom: 11, placed: 12 }, { zoom: 13, placed: 14 }, { zoom: 15, placed: 16 }, { zoom: 17, placed: 18 }]

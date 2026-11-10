@@ -76,10 +76,10 @@ const lineStyle = (colour, width) => new mapkit.Style({
 
 /** Lines are pitchPoints apart (centre to centre) at zoom 14, doubling
  *  every two levels in and halving every two out, but never closer than
- *  minPitchPoints; two thirds of that wide, up to 3 points. */
+ *  minPitchPoints; linePoints of pitchPoints of that wide, up to 3 points. */
 const bundles = prepare(transit.graph)
 const pitchAt = (z) => Math.max(transit.minPitchPoints, transit.pitchPoints * 2 ** ((z - 14) / 2))
-const widthAt = (z) => Math.min(3, (pitchAt(z) * 2) / 3)
+const widthAt = (z) => Math.min(3, (pitchAt(z) * transit.linePoints) / transit.pitchPoints)
 /** The zoom lines are drawn for: every half level from zoom 12, every whole
  *  level further out (where less changes), from zoom 5 to 19. */
 const levelAt = (z) => Math.min(19, Math.max(5, z >= 12 ? Math.round(z * 2) / 2 : Math.round(z)))

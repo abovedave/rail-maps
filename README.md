@@ -78,8 +78,9 @@ from the ordered line graph in `out/gb.transit.json` (`web/bundles.js`, and
 centreline in loom's order, cut back at junctions and joined through them
 with curves. It takes about 30 ms for all of Britain, so the map redraws as
 it zooms, every half level from zoom 12 and every whole level further out:
-lines 3 pt apart at zoom 14, doubling every two levels in and halving every
-two out but never closer than 2.5 pt, two thirds of that wide, up to 3 pt.
+lines 3.5 pt apart at zoom 14, doubling every two levels in and halving
+every two out but never closer than 3 pt, half that wide, up to 3 pt
+(`LINE_POINTS` and the pitches in `map/render.ts`).
 Line names are placed along the track for each zoom step from zoom 11, with
 the side their line is drawn on, for the map to move them onto it.
 
