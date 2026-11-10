@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const port = Number(process.env.PORT ?? 8080)
-const types: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml' }
+const types: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json' }
 
 createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url ?? '/', 'http://localhost').pathname)

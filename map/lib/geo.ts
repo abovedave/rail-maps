@@ -39,15 +39,6 @@ export function kept(p: [number, number][], tolerance: number): Uint8Array {
   return keep
 }
 
-/** Douglas–Peucker on flat points, keeping both ends. */
-export function simplify(p: [number, number][], tolerance: number): [number, number][] {
-  if (p.length <= 2) return p
-
-  const keep = kept(p, tolerance)
-
-  return p.filter((_, i) => keep[i])
-}
-
 /** Douglas–Peucker on latitudes and longitudes, the tolerance in metres. */
 export function simplifyLatLon(path: LatLon[], tolerance: number): LatLon[] {
   if (path.length <= 2) return path

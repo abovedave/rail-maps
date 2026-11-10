@@ -1,9 +1,9 @@
 // Places line names along lines, for maps to show as text on the line,
 // turned to run along it (as Apple Maps names its transit lines).
 //
-// Lines sharing track are placed along it, each with its side of the track
-// (how many pitches to the right of the way it runs), for maps to move the
-// name onto the line as they draw it (web/bundles.js).
+// Names are placed along the track, each with its line's side of it (how
+// many pitches to the right of the way it runs), for maps to move the name
+// onto its line as they draw it (web/bundles.js).
 //
 // For each zoom step (render.ts), each line gets its name where it runs about
 // straight for at least the name's length, clear of stations and of other
@@ -12,8 +12,9 @@
 // of its lines', others by their own. Lines are named in LINES' order, so the
 // named networks get room before National Rail.
 //
-// Sizes are screen points at the zoom a drawing is drawn for, measured half
-// a zoom further out, where it's first shown and things are closest.
+// Sizes are screen points at the zoom a step's names are placed for,
+// measured half a zoom further out, where they first show and things are
+// closest.
 
 import { segmentDistance } from './graph.ts'
 import { LINES } from '../lines.ts'
@@ -35,9 +36,9 @@ const BOW = 2.5
 const STEP = 30
 const REPEAT = 300
 
-/** How far a line's drawing can be from the track its name is from, in Web
- *  Mercator metres (lines are drawn beside each other, up to a few hundred
- *  metres off their track zoomed out). */
+/** How far a line in the line graph can be from the track its name is
+ *  from, in Web Mercator metres (merging and tidying move lines off their
+ *  track). */
 const NAME_REACH = 600
 
 type Vec = [number, number]
@@ -82,19 +83,20 @@ export function nameIndex(names: [string, string, Vec[]][], toMercator: (p: Vec)
   }
 }
 
-/** Names for one step's lines (Web Mercator metres), as [text, colour,
- *  lon, lat, angle, side]: the angle in degrees clockwise from east on a
- *  north-up map, between -90 and 90 so it reads left to right, and the side
- *  how many pitches below the text's middle (looking along it) its line is. */
+/** Names for one step's lines (Web Mercator metres, each with its side of
+ *  the track), as [text, colour, lon, lat, angle, side]: the angle in
+ *  degrees clockwise from east on a north-up map, between -90 and 90 so it
+ *  reads left to right, and the side how many pitches below the text's
+ *  middle (looking along it) its line is. */
 export function placeLabels(
-  lines: { colour: string; points: Vec[]; side?: number }[],
-  drawnMetresPerPoint: number,
+  lines: { colour: string; points: Vec[]; side: number }[],
+  metresPerPoint: number,
   stations: Vec[],
   nameAt: (line: string, at: Vec) => string | undefined,
   fromMercator: (x: number, y: number) => Vec,
 ): (string | number)[][] {
-  // Measured half a zoom out, where the drawing is first shown
-  const point = drawnMetresPerPoint * Math.SQRT2
+  // Measured half a zoom out, where the names first show
+  const point = metresPerPoint * Math.SQRT2
   const lineOf = new Map(Object.entries(LINES).map(([line, { colour }]) => [colour.toLowerCase(), line]))
   const order = Object.keys(LINES)
   const placed: Label[] = []
@@ -142,7 +144,7 @@ export function placeLabels(
     .map((l) => ({ ...l, line: lineOf.get(l.colour)!, length: l.points.reduce((sum, p, i) => sum + (i ? Math.hypot(p[0] - l.points[i - 1][0], p[1] - l.points[i - 1][1]) : 0), 0) }))
     .sort((a, b) => order.indexOf(a.line) === order.indexOf(b.line) ? b.length - a.length : (a.line === 'National Rail' ? 1 : 0) - (b.line === 'National Rail' ? 1 : 0) || order.indexOf(a.line) - order.indexOf(b.line))
 
-  for (const { colour, points, line, length, side = 0 } of ordered) {
+  for (const { colour, points, line, length, side } of ordered) {
     const distance = [0]
 
     for (let i = 1; i < points.length; i++) distance.push(distance[i - 1] + Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]))

@@ -166,7 +166,8 @@ const features: Feature[] = []
 const usedNodes = new Set<number>()
 const lonLat = (n: number) => [coords.get(n)![1], coords.get(n)![0]]
 const linesOf = (a: number, b: number) => [...(segmentLines.get(segment(a, b)) ?? [])].sort().join('|')
-const drawn = new Set<string>()
+/** Stretches of track already in an edge. */
+const inEdges = new Set<string>()
 let edgeId = 0
 
 /** What each line is called along stretches of track, for names.json. */
@@ -222,14 +223,14 @@ for (const [way, nodes] of wayNodes) {
     const [a, b] = [nodes[i - 1], nodes[i]]
     const key = segment(a, b)
 
-    if (!segmentLines.has(key) || drawn.has(key)) {
+    if (!segmentLines.has(key) || inEdges.has(key)) {
       if (piece.length > 1) addEdge(piece, way)
 
       piece = []
       continue
     }
 
-    drawn.add(key)
+    inEdges.add(key)
 
     const before = piece[piece.length - 2]
 

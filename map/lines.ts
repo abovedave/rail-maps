@@ -1,8 +1,8 @@
-// How services are grouped into lines, and how lines are drawn.
+// How services are grouped into lines, and each line's colour.
 
 /** The lines, each drawn in its colour (hex). National Rail is one line,
  *  the base network; a few networks people know by their own name have
- *  their own, drawn over it where they share track. `dark` is a colour for
+ *  their own, drawn beside it where they share track. `dark` is a colour for
  *  dark maps, where `colour` is too dark to see. */
 export const LINES: Record<string, { colour: string; dark?: string }> = {
   'National Rail': { colour: '1D2D5C', dark: 'B9C6E4' },
@@ -35,7 +35,7 @@ const OWN_LINES = new Set(['Thameslink', 'Southeastern', 'South Western Railway'
 
 /** Britain's train companies, each with the other names OpenStreetMap uses
  *  for it (old names, owners, misspellings). */
-export const TRAIN_COMPANIES: Record<string, string[]> = {
+const TRAIN_COMPANIES: Record<string, string[]> = {
   'Avanti West Coast': [],
   'c2c': [],
   'Caledonian Sleeper': [],
@@ -78,7 +78,7 @@ for (const [name, aliases] of Object.entries(TRAIN_COMPANIES)) {
  *  of its name ("Southern: London Victoria → Littlehampton"), operator or
  *  network, in that order, as a brand is more specific than an operator
  *  (Govia Thameslink Railway runs Southern, Thameslink and others). */
-export function trainCompany(tags: Record<string, string>): string | undefined {
+function trainCompany(tags: Record<string, string>): string | undefined {
   for (const name of [tags.brand, tags.name?.split(':')[0], tags.operator, tags.network]) {
     const company = name && companies.get(name.trim().toLowerCase())
     if (company) return company
