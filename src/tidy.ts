@@ -21,12 +21,15 @@
 // from one stop to its next only because of them, it may along the way it
 // would go (see routes.ts), so it's drawn as one line, unbroken.
 //
-//   node src/tidy.ts topo.json [routes.json linegraph.json] > tidy.json
+//   node src/tidy.ts topo.json stations.json [routes.json linegraph.json] > tidy.json
+//
+// stations.json is which station each stop is (from linegraph.ts).
 
 import { readFileSync } from 'node:fs'
 import {
   type Coord, type EdgeFeature, type Line, type NodeFeature, type TurnBan, type Way,
-  edgeLength, edgesByNode, isNode, length, lineIds, other, pathLength, pushTo, readGraph, search, segmentDistance, waysBetween,
+  edgeLength, edgesByNode, isNode, length, lineIds, other, pathLength, pushTo, readGraph, readStationKeys, search, segmentDistance,
+  stationKey, waysBetween,
 } from './graph.ts'
 import { services, type Route } from './routes.ts'
 
@@ -56,7 +59,9 @@ const BYPASS_RATIO = 1.3
 
 // MARK: The graph, changed in place
 
-const graph = readGraph(process.argv[2])
+const [graphFile, stationsFile, routesFile, linegraphFile] = process.argv.slice(2)
+const graph = readGraph(graphFile)
+const keys = readStationKeys(stationsFile)
 const nodes = new Map<string, NodeFeature>()
 let edges: EdgeFeature[] = []
 for (const f of graph.features) isNode(f) ? nodes.set(f.properties.id, f) : edges.push(f)
@@ -184,7 +189,7 @@ function joinJunctions() {
   return joined
 }
 
-/** Joins a station's stops linked by track shorter than MAX_STOP_LINK
+/** Joins a station's stops (see stationGroups.ts) linked by track shorter than MAX_STOP_LINK
  *  (directly, or through junctions but no other station) into one, where
  *  the stop with the most lines is, joining the junctions between into it
  *  too: platforms topo leaves apart (it no longer merges stops by name, see
@@ -192,11 +197,11 @@ function joinJunctions() {
  *  station (St Pancras). Stops not linked by track (Whitechapel's Elizabeth
  *  line, deep under the Overground's) are left apart. */
 function joinStops() {
-  const name = (n: string) => nodes.get(n)?.properties.station_label
+  const station = (n: string) => stationKey(keys, node(n))
   const lineCount = (n: string) => new Set(edgesAt.get(n)!.flatMap(lineIds)).size
   /** Where lines end: a stop with one track. */
   const isTerminus = (n: string) => edgesAt.get(n)?.length === 1
-  /** The track from a stop to the nearest other stop of its name, within
+  /** The track from a stop to the nearest other stop of its station, within
    *  MAX_STOP_LINK (MAX_TERMINUS_LINK between termini), through junctions
    *  only. */
   const link = (start: string) => {
@@ -204,7 +209,7 @@ function joinStops() {
     return search(start, edgesAt, (at, distance) => {
       if (distance >= limit) return 'give up'
       if (at === start || !isStation(at)) return 'go on'
-      if (name(at) !== name(start)) return 'pass'
+      if (station(at) !== station(start)) return 'pass'
       if (distance >= MAX_STOP_LINK && !isTerminus(at)) return 'pass'
       return 'found'
     })
@@ -384,9 +389,9 @@ const kept = [...nodes.values()].filter((n) => edgesAt.has(n.properties.id)).map
 
 // Turns services make that topo didn't allow
 let lifted = 0
-if (process.argv[3] && process.argv[4]) {
-  const routes: Route[] = JSON.parse(readFileSync(process.argv[3], 'utf8'))
-  const { nodes: byId, runs, way } = services([...kept, ...edges], readGraph(process.argv[4]).features)
+if (routesFile && linegraphFile) {
+  const routes: Route[] = JSON.parse(readFileSync(routesFile, 'utf8'))
+  const { nodes: byId, runs, way } = services([...kept, ...edges], readGraph(linegraphFile).features, keys)
   for (const run of runs(routes).runs) {
     if (way(run)) continue
     const turns = way(run, true)

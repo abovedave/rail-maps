@@ -2,7 +2,7 @@
 // as a dot on each line calling there, and each line's colour on dark maps.
 
 import { mercX, mercY } from './geo.ts'
-import { type EdgeFeature, type Graph, edgesByNode, isEdge, isNode } from './graph.ts'
+import { type EdgeFeature, type Graph, type StationKeys, edgesByNode, isEdge, isNode, stationKey } from './graph.ts'
 import { LINES } from './lines.ts'
 
 /** Each line's colour on dark maps, by its colour, where it has one. */
@@ -17,32 +17,36 @@ export function darkColours() {
  *  right to its left, LOOM's order, so the first colour's line is drawn
  *  furthest right looking along it. Lines are pitchPoints apart (centre to
  *  centre), centred on the station. */
-export function stationDots(graph: Graph) {
-  return grouped(stopDots(graph))
+export function stationDots(graph: Graph, keys: StationKeys) {
+  return grouped(stopDots(graph, keys))
 }
 
 /** A station's dots: [name, lon, lat, angle, colour, …]. */
 export type Dots = [name: string, lon: number, lat: number, angle: number, ...colours: string[]]
 
+/** Stops of a station further apart than this, in metres, are drawn apart
+ *  however many lines they share (a safety net: they shouldn't be). */
+const STATION_SPREAD = 1000
+
 /** Stops grouped into stations: each OSM stop is its own station in the
- *  graph (see linegraph.ts), so of stops with the same name close together,
+ *  graph (see linegraph.ts), so of a station's stops (stationGroups.ts),
  *  only those showing a line no other does are kept, the one with the most
  *  lines first. Where a station's lines share platforms that's one set of
  *  dots; where they're apart (Whitechapel), each line's are on it. */
-function grouped(stops: Dots[]) {
-  const kept: Dots[] = []
-  for (const stop of [...stops].sort((a, b) => b.length - a.length)) {
-    const [name, lon, lat] = stop
-    const covered = kept.some((k) => k[0] === name
-      && Math.hypot((k[1] - lon) * 69_400, (k[2] - lat) * 111_320) < 500
-      && stop.slice(4).every((c) => k.slice(4).includes(c)))
+function grouped(stops: { station: string; dots: Dots }[]) {
+  const kept: { station: string; dots: Dots }[] = []
+  for (const stop of [...stops].sort((a, b) => b.dots.length - a.dots.length)) {
+    const [, lon, lat, , ...colours] = stop.dots
+    const covered = kept.some(({ station, dots: [, kLon, kLat, , ...kColours] }) => station === stop.station
+      && Math.hypot((kLon - lon) * 69_400, (kLat - lat) * 111_320) < STATION_SPREAD
+      && colours.every((c) => kColours.includes(c)))
     if (!covered) kept.push(stop)
   }
-  return kept
+  return kept.map((k) => k.dots)
 }
 
 /** Each stop's dots. */
-function stopDots(graph: Graph): Dots[] {
+function stopDots(graph: Graph, keys: StationKeys): { station: string; dots: Dots }[] {
   const edgesAt = edgesByNode(graph.features.filter(isEdge))
   return graph.features.filter(isNode).filter((f) => f.properties.station_label).flatMap((f) => {
     const p = f.properties
@@ -65,6 +69,7 @@ function stopDots(graph: Graph): Dots[] {
     if (!atStart) [dx, dy] = [-dx, -dy]
     const angle = Math.round((-Math.atan2(dy, dx) * 180) / Math.PI * 10) / 10
     const [lon, lat] = f.geometry.coordinates
-    return [[p.station_label!, Math.round(lon * 1e6) / 1e6, Math.round(lat * 1e6) / 1e6, angle, ...colours]]
+    const dots: Dots = [p.station_label!, Math.round(lon * 1e6) / 1e6, Math.round(lat * 1e6) / 1e6, angle, ...colours]
+    return [{ station: stationKey(keys, f), dots }]
   })
 }

@@ -5,15 +5,16 @@
 // A service is from linegraph.ts's routes.json: its line, and its stops by
 // station_id. Topo and tidy keep each station's station_id, but join a
 // station's stops into one (keeping one's id), so a stop is also matched to
-// stations of its name nearby.
+// the nodes of its station (stationGroups.ts) nearby.
 
-import { type Feature, type NodeFeature, isEdge, isNode, lineIds, pushTo } from './graph.ts'
+import { type Feature, type NodeFeature, type StationKeys, isEdge, isNode, lineIds, pushTo, stationKey } from './graph.ts'
 
 /** A service: its name, line and stops (station_ids), from linegraph.ts. */
 export type Route = { name: string; line: string; stops: string[] }
 
-/** How far a stop can be from the station it was joined into, in metres. */
-const MATCH = 500
+/** How far a stop can be from the node of its station it was joined into,
+ *  in metres (tidy joins a terminus's stops up to 1.5 km apart). */
+const MATCH = 2000
 
 /** Metres between two [lon, lat] points, near enough nearby. */
 const metres = ([a, b]: number[], [c, d]: number[]) => Math.hypot((a - c) * 111_320 * Math.cos((b * Math.PI) / 180), (b - d) * 110_540)
@@ -21,16 +22,15 @@ const metres = ([a, b]: number[], [c, d]: number[]) => Math.hypot((a - c) * 111_
 /** A line graph's services, stop to stop. `features` is the graph (nodes
  *  and edges, as topo, tidy and loom write it), and `stopFeatures` the
  *  line graph's stops, for where each was. */
-export function services(features: Feature[], stopFeatures: Feature[]) {
+export function services(features: Feature[], stopFeatures: Feature[], keys: StationKeys) {
   const nodes = new Map<string, NodeFeature>()
   const stationNode = new Map<string, string>()
-  const stationsNamed = new Map<string, NodeFeature[]>()
+  const nodesOfStation = new Map<string, NodeFeature[]>()
   for (const f of features) {
     if (!isNode(f)) continue
     nodes.set(f.properties.id, f)
     if (f.properties.station_id) stationNode.set(f.properties.station_id, f.properties.id)
-    const name = f.properties.station_label
-    if (name) pushTo(stationsNamed, name, f)
+    if (f.properties.station_label) pushTo(nodesOfStation, stationKey(keys, f), f)
   }
   const stopsFound = new Map<string, NodeFeature>()
   for (const f of stopFeatures) if (isNode(f) && f.properties.station_id) stopsFound.set(f.properties.station_id, f)
@@ -50,14 +50,14 @@ export function services(features: Feature[], stopFeatures: Feature[]) {
     !(nodes.get(node)!.properties.excluded_conn ?? []).some((c) => c.line === line && c.node_from === from && c.node_to === to)
 
   /** The graph nodes a stop of a line may now be, likeliest first: itself,
-   *  then stations of its name within MATCH, nearest first, those with the
+   *  then its station's other nodes within MATCH, nearest first, those with the
    *  line's track before those without. A station can have stops apart on
    *  different track (Watford Junction's Abbey Line platform). */
   function nodesFor(stop: string, line: string): string[] {
     const own = stationNode.get(stop)
     const found = stopsFound.get(stop)
     const near = found
-      ? (stationsNamed.get(found.properties.station_label!) ?? [])
+      ? (nodesOfStation.get(stationKey(keys, found)) ?? [])
         .map((f) => ({ id: f.properties.id as string, d: metres(f.geometry.coordinates, found.geometry.coordinates) }))
         .filter(({ d }) => d <= MATCH)
         .sort((x, y) => (carries(x.id, line) ? 0 : MATCH) + x.d - ((carries(y.id, line) ? 0 : MATCH) + y.d))

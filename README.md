@@ -28,13 +28,22 @@ also its own script (`npm run linegraph`, `topo`, `tidy`, `render`,
 | Step | Tool | Output |
 |---|---|---|
 | 1. Download | `npm run osm`: Geofabrik's Great Britain extract | `vendor/osm/great-britain-latest.osm.pbf` |
-| 2. Line graph | `src/linegraph.ts`: every `route=train` relation, via osmium | `out/gb.linegraph.json`, `out/gb.routes.json` |
+| 2. Line graph | `src/linegraph.ts`: every `route=train` relation, via osmium, its stops grouped into stations by CRS code (`src/stationGroups.ts`) | `out/gb.linegraph.json`, `out/gb.routes.json`, `out/gb.stations.json` |
 | 3. Merge | `src/topo.ts`, with LOOM `topo`: each line's parallel tracks up to about 95 m apart become one smoothed corridor (about 30 m), then lines merge where they share track (about 50 m), so lines on different tracks nearby (the Elizabeth line under Whitechapel) stay apart | `out/gb.topo.json`, and the first pass in `out/gb.lines.json` |
 | 4. Tidy and order | `src/tidy.ts` simplifies knots `topo` leaves (junctions under 200 m apart become one, short parallel ways one, station-free bypasses within 500 m of a route carrying the same lines are dropped, such as the Redhill avoiding line, a station's platforms linked by under 400 m of track become one, or under 1.5 km at a terminus, so its lines run in together, and turn restrictions the services show are wrong are lifted), then LOOM `loom` orders the lines on each corridor | `out/gb.map.json` |
 | Check | `src/check.ts` (`npm run check`): every service in `out/gb.routes.json` (written by step 2) still runs unbroken from stop to stop on the finished graph; lists any breaks, by line | the build log |
 | 5. Draw | `src/render.ts`: LOOM `transitmap` draws lines side by side for zooms 14, 16 and 18, and an overview further out | `out/gb.transit.json` |
 | 6. Show | `web/map.js` with MapKit JS, or the app | the map |
 | Track graph | `src/tracks.ts`: all running track, split at junctions and the app's stations, for routing trains along real track | `out/gb.tracks.json` |
+
+**Stations.** A station's stops (its platforms, often each their own OSM
+node) are grouped by National Rail's CRS codes (`ref:crs`): a stop's own,
+its stop area's, or the nearest coded station's of its name (within 1 km)
+or any (within 200 m, for stops with no name or a misspelt one). Codes of
+one station are grouped too (St Pancras's STP and SPL), and stations are
+named after their coded station. Stops with no code (the Tyne and Wear
+Metro) are grouped by name. Later steps join and match a station's stops by
+this (`out/gb.stations.json`), not by name and distance.
 
 `src/osm.ts` (reading the extract with osmium), `src/geo.ts`
 (simplifying and encoding lines) and `src/graph.ts` (the line graph's

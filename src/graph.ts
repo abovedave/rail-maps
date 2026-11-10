@@ -44,6 +44,14 @@ export const isEdge = (f: Feature): f is EdgeFeature => f.geometry.type === 'Lin
 
 export const readGraph = (path: string): Graph => JSON.parse(readFileSync(path, 'utf8'))
 
+/** Which station each stop is, by station_id (stations.json, from
+ *  linegraph.ts): the same key for all of a station's stops. */
+export type StationKeys = Map<string, string>
+export const readStationKeys = (path: string): StationKeys => new Map(Object.entries(JSON.parse(readFileSync(path, 'utf8'))))
+/** A station node's key: its stop's, or else its name. */
+export const stationKey = (keys: StationKeys, n: NodeFeature) =>
+  (n.properties.station_id && keys.get(n.properties.station_id)) || `name:${n.properties.station_label}`
+
 /** Adds a value to the list at a key, making the list if needed. */
 export function pushTo<K, V>(map: Map<K, V[]>, key: K, value: V) {
   const list = map.get(key)

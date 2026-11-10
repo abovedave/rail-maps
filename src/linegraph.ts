@@ -1,7 +1,7 @@
 // Writes a LOOM line graph (GeoJSON) of Britain's train services from an
 // OpenStreetMap extract.
 //
-//   node src/linegraph.ts <extract.osm.pbf> [routes.json [names.json]] > linegraph.json
+//   node src/linegraph.ts <extract.osm.pbf> [routes.json [names.json [stations.json]]] > linegraph.json
 //
 // With routes.json, also writes each service's stops in order, for check.ts
 // to see that the finished map still runs each service from stop to stop:
@@ -9,7 +9,9 @@
 // each line is called along each stretch of its track, for render.ts to
 // label it: [[line, name, [[lon, lat], …]]]. National Rail is called by its
 // track's name (West Coast Main Line), the Overground by each of its lines'
-// (Windrush line), and other lines by their own.
+// (Windrush line), and other lines by their own. With stations.json, also
+// writes which station each stop is, { station_id: key }, its CRS code (see
+// stationGroups.ts), for later steps to join and match a station's stops.
 //
 // Each `route=train` relation is one service (and the Tyne and Wear Metro's
 // `route=light_rail` ones). Services are grouped into lines (see lines.ts):
@@ -17,7 +19,7 @@
 // own line. The OSM ways the services run on become edges (just the parts of
 // each way the trains use), split at junctions, stops and where the lines
 // change, and each edge lists the lines using it. Stops become station
-// nodes named after the stop. LOOM's `topo` then merges parallel tracks
+// nodes named after their station (stationGroups.ts). LOOM's `topo` then merges parallel tracks
 // into one edge per corridor.
 //
 // Needs osmium (`brew install osmium-tool`).
@@ -26,6 +28,7 @@ import { writeFileSync } from 'node:fs'
 import { simplifyLatLon } from './geo.ts'
 import { lineColour, routeLine } from './lines.ts'
 import { filtered, inNorthernIreland, type LatLon } from './osm.ts'
+import { type CodedStation, type StopArea, stationGroups } from './stationGroups.ts'
 
 const pbf = process.argv[2]
 if (!pbf) {
@@ -82,6 +85,9 @@ const segmentLines = new Map<string, Set<string>>()
 const wayNames = new Map<number, string>()
 const segmentRefs = new Map<string, Map<string, number>>()
 const segment = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`)
+/** Stations with a CRS code, and stop areas, to group stops into stations. */
+const coded = new Map<number, CodedStation>()
+const stopAreas: StopArea[] = []
 /** Each service, its line and stops in order, for check.ts. */
 const routes: { name: string; line: string; stops: number[] }[] = []
 
@@ -100,17 +106,21 @@ function usedPart(nodes: number[], before: number[] | undefined, after: number[]
   return nodes.slice(Math.min(from, to), Math.max(from, to) + 1)
 }
 
-for await (const { type, id, tags, at, nodes, members } of filtered(pbf, ['r/route=train,light_rail'])) {
+for await (const { type, id, tags, at, nodes, members } of filtered(pbf, ['r/route=train,light_rail', 'r/public_transport=stop_area', 'n/ref:crs'])) {
   if (type === 'n') {
     if (at) coords.set(id, at)
     if (tags.name) names.set(id, tags.name)
+    if (tags['ref:crs'] && at) coded.set(id, { crs: tags['ref:crs'], name: tags.name, at })
     if (tags.name && (['stop', 'station', 'halt'].includes(tags.railway) || tags.public_transport === 'stop_position') && tags.train !== 'no' && tags.usage !== 'tourism') trackStops.add(id)
   } else if (type === 'w') {
     if (isTrack(tags) && nodes!.length) {
       wayNodes.set(id, nodes!.filter((n) => coords.has(n)))
       if (tags.name) wayNames.set(id, tags.name)
     }
-  } else {
+  } else if (tags.public_transport === 'stop_area') {
+    stopAreas.push({ crs: tags['ref:crs'], members: members!.filter((m) => m.type === 'n').map((m) => m.id) })
+  } else if (tags.route === 'train' || tags.route === 'light_rail') {
+    // Only train routes: stop areas can bring in others (bus, ferry) they list
     let service = serviceLine(tags)
     if (!service) continue
     const ways: number[][] = []
@@ -208,18 +218,19 @@ for (const [way, nodes] of wayNodes) {
   }
   if (piece.length > 1) addEdge(piece, way)
 }
+const stations = stationGroups([...stopNodes].filter((n) => coords.has(n)).map((n) => ({ id: n, name: names.get(n), at: coords.get(n)! })), coded, stopAreas)
+
 // Each stop is its own station to topo: it merges stations with the same id,
 // and runs every line calling there through one point, which pulls lines off
 // their track where a station's platforms are apart (the Elizabeth line
 // under Whitechapel). Stops are grouped into stations for drawing instead
 // (stationDots in render.ts)
 for (const n of usedNodes) {
-  const station = stopNodes.has(n) ? names.get(n) : undefined
-  const id = station && `n${n}`
+  const station = stopNodes.has(n) ? stations.get(n) : undefined
   features.push({
     type: 'Feature',
     geometry: { type: 'Point', coordinates: lonLat(n) },
-    properties: { id: `n${n}`, ...(station ? { station_id: id, station_label: station } : {}) },
+    properties: { id: `n${n}`, ...(station ? { station_id: `n${n}`, station_label: station.name } : {}) },
   })
 }
 
@@ -231,6 +242,12 @@ process.stdout.write(JSON.stringify({ type: 'FeatureCollection', features }))
 // Ireland, ways left out) can't be checked
 if (process.argv[3]) {
   writeFileSync(process.argv[3], JSON.stringify(routes.map((r) => ({ ...r, stops: r.stops.filter((n) => usedNodes.has(n)).map((n) => `n${n}`) }))))
+}
+if (process.argv[5]) {
+  const keys = [...usedNodes].filter((n) => stopNodes.has(n) && stations.has(n)).map((n) => [`n${n}`, stations.get(n)!.key])
+  writeFileSync(process.argv[5], JSON.stringify(Object.fromEntries(keys)))
+  const named = new Set(keys.map(([, key]) => key))
+  console.error(`${keys.length} stops at ${named.size} stations, ${[...named].filter((k) => k.startsWith('name:')).length} of them with no CRS code`)
 }
 if (process.argv[4]) {
   const round = (v: number) => Math.round(v * 1e5) / 1e5

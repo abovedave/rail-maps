@@ -4,23 +4,23 @@
 // excluded_conn), and never reversing. Lists the breaks, by line, for
 // fixing upstream (topo, tidy); the build carries on regardless.
 //
-//   node src/check.ts routes.json linegraph.json map.json
+//   node src/check.ts routes.json linegraph.json stations.json map.json
 //
-// routes.json and linegraph.json are from linegraph.ts; map.json is loom's
+// routes.json, linegraph.json and stations.json are from linegraph.ts; map.json is loom's
 // output (gb.map.json). Stops are matched as routes.ts does; a stop that
 // matches none is skipped, joining the stops either side.
 
 import { readFileSync } from 'node:fs'
-import { readGraph } from './graph.ts'
+import { readGraph, readStationKeys } from './graph.ts'
 import { services, type Route } from './routes.ts'
 
-const [routesFile, linegraphFile, mapFile] = process.argv.slice(2)
-if (!routesFile || !linegraphFile || !mapFile) {
-  console.error('Usage: node src/check.ts <routes.json> <linegraph.json> <map.json>')
+const [routesFile, linegraphFile, stationsFile, mapFile] = process.argv.slice(2)
+if (!routesFile || !linegraphFile || !stationsFile || !mapFile) {
+  console.error('Usage: node src/check.ts <routes.json> <linegraph.json> <stations.json> <map.json>')
   process.exit(1)
 }
 const routes: Route[] = JSON.parse(readFileSync(routesFile, 'utf8'))
-const { nodes, runs, way } = services(readGraph(mapFile).features, readGraph(linegraphFile).features)
+const { nodes, runs, way } = services(readGraph(mapFile).features, readGraph(linegraphFile).features, readStationKeys(stationsFile))
 
 const label = (node: string) => nodes.get(node)?.properties.station_label ?? node
 /** Breaks, each once however many services have it: by line, then the two
