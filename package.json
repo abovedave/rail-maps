@@ -15,7 +15,6 @@
     "check": "node map/check.ts out/gb.routes.json out/gb.linegraph.json out/gb.stations.json out/gb.map.json",
     "render": "node map/render.ts",
     "tracks": "node map/tracks.ts vendor/osm/great-britain-latest.osm.pbf ../app/api/public/stations.json > out/gb.tracks.json",
-    "app": "cp out/gb.transit.json ../app/Public/transit.json && cp out/gb.tracks.json ../app/Public/tracks.json",
     "web": "node --env-file=.env web/serve.ts",
     "typecheck": "tsc"
   },

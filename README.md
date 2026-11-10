@@ -6,7 +6,8 @@ people know by name (the Elizabeth line, the Overground, Thameslink…) in
 their own colours, side by side where they share track.
 
 It builds one file, `out/gb.transit.json`, which a web preview (`web/`) and
-the app (`../the app`) both draw.
+the app (`../the app`) both draw. the app copies it in itself:
+see "Map sources" in its README.
 
 ## Quick start
 
@@ -272,21 +273,6 @@ function with a blank line.
 Tidy's output is the same every run, byte for byte, so a change to it can
 be checked by comparing. LOOM's `topo` and `loom` vary a little from run to
 run, so theirs can't: compare it on the map instead.
-
-## the app
-
-the app (in `../the app`) shows `out/gb.transit.json`, and routes trains
-along `out/gb.tracks.json`, for which the build snaps the app's stations
-(`../app/api/public/stations.json`) to the track. To update it:
-
-```sh
-npm run osm                      # the latest OSM extract
-npm run build                    # about 10 minutes
-npm run app                 # copy both files into the app
-```
-
-the app draws lines side by side as the web preview does: a change to
-`web/bundles.js` belongs in its `Map/TransitDrawing.swift` too.
 
 ## Output
 
