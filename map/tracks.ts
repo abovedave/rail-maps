@@ -1,7 +1,7 @@
 // Builds the rail track graph the app uses to draw a train's route along
 // real track.
 //
-//   node src/tracks.ts <extract.osm.pbf> <stations.json> > tracks.json
+//   node map/tracks.ts <extract.osm.pbf> <stations.json> > tracks.json
 //
 // stations.json is the app's station list (`api/public/stations.json`
 // there: { stations: [{ crs, lat, lon }] }).
@@ -15,12 +15,12 @@
 // Track data © OpenStreetMap contributors, ODbL.
 
 import { readFileSync } from 'node:fs'
-import { encode, metres, simplifyLatLon } from './geo.ts'
-import { filtered, inNorthernIreland, type LatLon } from './osm.ts'
+import { encode, metres, simplifyLatLon } from './lib/geo.ts'
+import { filtered, inNorthernIreland, type LatLon } from './lib/osm.ts'
 
 const [pbf, stationsPath] = process.argv.slice(2)
 if (!pbf || !stationsPath) {
-  console.error('Usage: node src/tracks.ts <extract.osm.pbf> <stations.json>')
+  console.error('Usage: node map/tracks.ts <extract.osm.pbf> <stations.json>')
   process.exit(1)
 }
 

@@ -2,7 +2,7 @@
 // from the line graph (out/gb.map.json, with out/gb.lines.json,
 // out/gb.names.json and out/gb.stations.json).
 //
-//   node src/render.ts
+//   node map/render.ts
 //
 // Zoomed out (from MIN_ZOOM), the map is an overview: each line on its own
 // track, over each other where they share it, drawn here (see overview).
@@ -26,12 +26,12 @@
 // (to the nearest whole zoom). Lines are Google encoded polylines.
 
 import { readFileSync, writeFileSync } from 'node:fs'
-import { encode, encodeIntegers, fromMercator, mercX, mercY, METRES_AT_ZOOM_0, simplify, simplifyLatLon } from './geo.ts'
-import { type Graph, isEdge, isNode, readGraph, readStationKeys } from './graph.ts'
-import { LABEL_POINTS, nameIndex, placeLabels } from './labels.ts'
+import { encode, encodeIntegers, fromMercator, mercX, mercY, METRES_AT_ZOOM_0, simplify, simplifyLatLon } from './lib/geo.ts'
+import { type Graph, isEdge, isNode, readGraph, readStationKeys } from './lib/graph.ts'
+import { LABEL_POINTS, nameIndex, placeLabels } from './lib/labels.ts'
 import { LINES } from './lines.ts'
-import type { LatLon } from './osm.ts'
-import { darkColours, stationDots } from './stations.ts'
+import type { LatLon } from './lib/osm.ts'
+import { darkColours, stationDots } from './lib/stations.ts'
 
 /** Lines' width, and the space between them, in screen points at zoom 14. */
 const LINE_POINTS = 2

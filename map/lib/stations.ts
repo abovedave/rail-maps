@@ -3,7 +3,7 @@
 
 import { mercX, mercY } from './geo.ts'
 import { type EdgeFeature, type Graph, type StationKeys, edgesByNode, isEdge, isNode, stationKey } from './graph.ts'
-import { LINES } from './lines.ts'
+import { LINES } from '../lines.ts'
 
 /** Each line's colour on dark maps, by its colour, where it has one. */
 export function darkColours() {

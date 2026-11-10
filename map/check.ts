@@ -4,19 +4,19 @@
 // excluded_conn), and never reversing. Lists the breaks, by line, for
 // fixing upstream (topo, tidy); the build carries on regardless.
 //
-//   node src/check.ts routes.json linegraph.json stations.json map.json
+//   node map/check.ts routes.json linegraph.json stations.json map.json
 //
 // routes.json, linegraph.json and stations.json are from linegraph.ts; map.json is loom's
 // output (gb.map.json). Stops are matched as routes.ts does; a stop that
 // matches none is skipped, joining the stops either side.
 
 import { readFileSync } from 'node:fs'
-import { readGraph, readStationKeys } from './graph.ts'
-import { services, type Route } from './routes.ts'
+import { readGraph, readStationKeys } from './lib/graph.ts'
+import { services, type Route } from './lib/routes.ts'
 
 const [routesFile, linegraphFile, stationsFile, mapFile] = process.argv.slice(2)
 if (!routesFile || !linegraphFile || !stationsFile || !mapFile) {
-  console.error('Usage: node src/check.ts <routes.json> <linegraph.json> <stations.json> <map.json>')
+  console.error('Usage: node map/check.ts <routes.json> <linegraph.json> <stations.json> <map.json>')
   process.exit(1)
 }
 const routes: Route[] = JSON.parse(readFileSync(routesFile, 'utf8'))

@@ -1,7 +1,7 @@
 // Serves the web map: web/ as the site, out/ as data/, and the MapKit JS
 // token from APPLE_MAPKIT_TOKEN.
 //
-//   node --env-file=.env src/serve.ts   (or npm run web)
+//   node --env-file=.env web/serve.ts   (or npm run web)
 
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'

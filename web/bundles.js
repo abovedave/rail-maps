@@ -1,5 +1,5 @@
 // Draws lines sharing track side by side, from the ordered line graph in
-// gb.transit.json (`graph`, see src/render.ts), at any scale: the map does
+// gb.transit.json (`graph`, see map/render.ts), at any scale: the map does
 // what LOOM's transitmap did ahead of time.
 //
 // Each edge's lines are offset from its centreline, a pitch apart, the

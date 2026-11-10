@@ -16,7 +16,7 @@
 // a zoom further out, where it's first shown and things are closest.
 
 import { segmentDistance } from './graph.ts'
-import { LINES } from './lines.ts'
+import { LINES } from '../lines.ts'
 
 /** Text size, and roughly how wide a character is, in points. */
 export const LABEL_POINTS = 11

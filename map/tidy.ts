@@ -21,7 +21,7 @@
 // from one stop to its next only because of them, it may along the way it
 // would go (see routes.ts), so it's drawn as one line, unbroken.
 //
-//   node src/tidy.ts topo.json stations.json [routes.json linegraph.json] > tidy.json
+//   node map/tidy.ts topo.json stations.json [routes.json linegraph.json] > tidy.json
 //
 // stations.json is which station each stop is (from linegraph.ts).
 
@@ -30,8 +30,8 @@ import {
   type Coord, type EdgeFeature, type Line, type NodeFeature, type TurnBan, type Way,
   edgeLength, edgesByNode, isNode, length, lineIds, other, pathLength, pushTo, readGraph, readStationKeys, search, segmentDistance,
   stationKey, waysBetween,
-} from './graph.ts'
-import { services, type Route } from './routes.ts'
+} from './lib/graph.ts'
+import { services, type Route } from './lib/routes.ts'
 
 /** Junctions joined by a track shorter than this, in metres, become one. */
 const MIN_TRACK = 200

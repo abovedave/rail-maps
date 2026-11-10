@@ -1,7 +1,7 @@
 // Writes a LOOM line graph (GeoJSON) of Britain's train services from an
 // OpenStreetMap extract.
 //
-//   node src/linegraph.ts <extract.osm.pbf> [routes.json [names.json [stations.json]]] > linegraph.json
+//   node map/linegraph.ts <extract.osm.pbf> [routes.json [names.json [stations.json]]] > linegraph.json
 //
 // With routes.json, also writes each service's stops in order, for check.ts
 // to see that the finished map still runs each service from stop to stop:
@@ -25,14 +25,14 @@
 // Needs osmium (`brew install osmium-tool`).
 
 import { writeFileSync } from 'node:fs'
-import { simplifyLatLon } from './geo.ts'
+import { simplifyLatLon } from './lib/geo.ts'
 import { lineColour, serviceLine } from './lines.ts'
-import { filtered, inNorthernIreland, type LatLon } from './osm.ts'
-import { type CodedStation, type StopArea, stationGroups } from './stationGroups.ts'
+import { filtered, inNorthernIreland, type LatLon } from './lib/osm.ts'
+import { type CodedStation, type StopArea, stationGroups } from './lib/stationGroups.ts'
 
 const pbf = process.argv[2]
 if (!pbf) {
-  console.error('Usage: node src/linegraph.ts <extract.osm.pbf> [routes.json]')
+  console.error('Usage: node map/linegraph.ts <extract.osm.pbf> [routes.json]')
   process.exit(1)
 }
 

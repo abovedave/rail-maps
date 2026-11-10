@@ -2,7 +2,7 @@
 // track on its own, then all the lines together, only where they're close
 // enough to share track.
 //
-//   node src/topo.ts linegraph.json [lines.json] > topo.json
+//   node map/topo.ts linegraph.json [lines.json] > topo.json
 //
 // With lines.json, also writes the first pass, each line merged on its own,
 // for render.ts's overview: one centreline per line, before lines merge.
@@ -16,7 +16,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
-import { type EdgeFeature, type Feature, type Graph, type NodeFeature, isEdge, isNode, lineIds, readGraph } from './graph.ts'
+import { type EdgeFeature, type Feature, type Graph, type NodeFeature, isEdge, isNode, lineIds, readGraph } from './lib/graph.ts'
 
 /** How far apart tracks are merged, in topo's units (Web Mercator metres:
  *  about 0.6 m on the ground in Britain): a line's own, then lines'. */

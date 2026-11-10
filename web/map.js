@@ -1,7 +1,7 @@
 // Shows Britain's transit map on Apple Maps with MapKit JS, from
-// out/gb.transit.json (see src/render.ts), the same way the app does.
+// out/gb.transit.json (see map/render.ts), the same way the app does.
 //
-// Zoomed out, the lines are an overview drawn ahead of time (src/render.ts),
+// Zoomed out, the lines are an overview drawn ahead of time (map/render.ts),
 // each line on its own track, widening and narrowing as Apple's roads do;
 // zoomed in, lines sharing track are drawn side by side here (bundles.js),
 // from the line graph. Stations are a dot on each line calling there, in
@@ -234,7 +234,7 @@ function showStations(z) {
 
 // MARK: Line names
 
-/** Each line's name along it (see src/labels.ts), placed for the drawing
+/** Each line's name along it (see map/lib/labels.ts), placed for the drawing
  *  shown, from its own zoom. Turned to run along the line, back by the
  *  map's rotation, and never upside down. */
 let shownNames = new Map()
