@@ -1,11 +1,9 @@
 // Shows Britain's transit map on Apple Maps with MapKit JS, from
 // out/gb.transit.json (see map/render.ts), the same way the app does.
 //
-// Zoomed out, the lines are an overview drawn ahead of time (map/render.ts),
-// each line on its own track, widening and narrowing as Apple's roads do;
-// zoomed in, lines sharing track are drawn side by side here (bundles.js),
-// from the line graph. Stations are a dot on each line calling there, in
-// its colour, or one white dot zoomed out.
+// Lines sharing track are drawn side by side here (bundles.js), from the
+// line graph, for the map's zoom. Stations are a dot on each line calling
+// there, in its colour, or one white dot zoomed out.
 
 import { draw, prepare } from './bundles.js'
 
@@ -61,12 +59,6 @@ function decodePairs(line, factor) {
 
 // MARK: Zoom and widths
 
-/** Apple's road widths in points at each zoom level from 0, as the app gets
- *  them from MKRoadWidthAtZoomScale, for lines to widen and narrow with. */
-const ROAD_POINTS = [2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 4, 4, 6, 6, 7, 9, 11, 12, 15, 16]
-/** Road width at a zoom, in whole steps, so overlays aren't restyled every
- *  frame. */
-const roadAt = (z) => ROAD_POINTS[Math.max(0, Math.min(ROAD_POINTS.length - 1, Math.round(z)))]
 /** The map's zoom level, from its size on screen. */
 function zoom() {
   const width = map.element.clientWidth || 1
@@ -82,57 +74,39 @@ const lineStyle = (colour, width) => new mapkit.Style({
 
 // MARK: Lines
 
-/** Which step to show for a zoom level: the last starting at or before it,
- *  to the nearest whole zoom. */
-const stepIndex = (z) => Math.max(0, transit.steps.findLastIndex((s) => s.zoom <= z + 0.5))
-
-/** Lines side by side are pitchPoints apart (centre to centre) at zoom 14,
- *  doubling every two levels in, and two thirds of that wide, from 0.2 to 3
- *  points. They're redrawn every half zoom level. */
+/** Lines are pitchPoints apart (centre to centre) at zoom 14, doubling
+ *  every two levels in and halving every two out, but never closer than
+ *  minPitchPoints; two thirds of that wide, up to 3 points. */
 const bundles = prepare(transit.graph)
-const pitchAt = (z) => transit.pitchPoints * 2 ** ((z - 14) / 2)
-const widthAt = (z) => Math.min(3, Math.max(0.2, (pitchAt(z) * 2) / 3))
-/** The overview's lines widen and narrow as roads do, no thinner than half
- *  as drawn: in whole steps, so overlays aren't restyled every frame. */
-const overviewWidthAt = (z, { drawn }) => transit.linePoints * Math.max(0.5, roadAt(z) / roadAt(drawn))
+const pitchAt = (z) => Math.max(transit.minPitchPoints, transit.pitchPoints * 2 ** ((z - 14) / 2))
+const widthAt = (z) => Math.min(3, (pitchAt(z) * 2) / 3)
+/** The zoom lines are drawn for: every half level from zoom 12, every whole
+ *  level further out (where less changes), from zoom 5 to 19. */
+const levelAt = (z) => Math.min(19, Math.max(5, z >= 12 ? Math.round(z * 2) / 2 : Math.round(z)))
 
-/** Overlays for each overview step and each half zoom drawn side by side,
- *  made when first shown. */
+/** Each level's line overlays, made when first shown. */
 const overlays = new Map()
-function overlaysFor(key, lines) {
-  if (!overlays.has(key)) {
-    overlays.set(key, lines().map(({ colour, points }) => {
-      const overlay = new mapkit.PolylineOverlay(points.map(([lat, lon]) => new mapkit.Coordinate(lat, lon)))
+function overlaysAt(level) {
+  if (!overlays.has(level)) {
+    overlays.set(level, draw(bundles, metresPerPoint(level), pitchAt(level)).map(({ colour, points }) => {
+      const overlay = new mapkit.PolylineOverlay(points.map(([lat, lon]) => new mapkit.Coordinate(lat, lon)), { style: lineStyle(colour, widthAt(level)) })
       overlay.colour = colour
       return overlay
     }))
   }
-  return overlays.get(key)
+  return overlays.get(level)
 }
 
-/** What's on the map: an overview step's lines, or lines side by side drawn
- *  for a half zoom level (`half`), and how wide. */
-let shown = { key: undefined, overlays: [], width: 0, half: undefined }
+/** The level drawn, and its overlays: kept while the map moves, as drawing
+ *  takes a moment. */
+let shown = { level: undefined, overlays: [] }
 function showLines(z, moving) {
-  const step = transit.steps[stepIndex(z)]
-  let next
-  if (step.overview) {
-    next = { key: `overview ${step.zoom}`, width: overviewWidthAt(z, step),
-      lines: () => step.lines.map(([colour, line]) => ({ colour, points: decodePairs(line, 1e5) })) }
-  } else {
-    // Kept while the map moves, as drawing takes a moment
-    const half = moving && shown.half !== undefined ? shown.half : Math.round(z * 2) / 2
-    next = { key: `side by side ${half}`, width: widthAt(half), half,
-      lines: () => draw(bundles, metresPerPoint(half), pitchAt(half)) }
-  }
-  if (next.key !== shown.key || next.width !== shown.width) {
-    const lines = overlaysFor(next.key, next.lines)
-    for (const overlay of lines) overlay.style = lineStyle(overlay.colour, next.width)
-    if (next.key !== shown.key) {
-      map.removeOverlays(shown.overlays)
-      map.addOverlays(lines)
-    }
-    shown = { key: next.key, overlays: lines, width: next.width, half: next.half }
+  const level = moving && shown.level !== undefined ? shown.level : levelAt(z)
+  if (level !== shown.level) {
+    const next = overlaysAt(level)
+    map.removeOverlays(shown.overlays)
+    map.addOverlays(next)
+    shown = { level, overlays: next }
   }
   return shown.overlays.length
 }
@@ -141,8 +115,7 @@ function showLines(z, moving) {
  *  apart than pitchPoints: for station dots to match. */
 const pitch = transit.pitchPoints
 function lineScale() {
-  if (shown.half === undefined) return { scale: 1, spread: 1 }
-  return { scale: shown.width / transit.linePoints, spread: pitchAt(shown.half) / pitch }
+  return { scale: widthAt(shown.level) / transit.linePoints, spread: pitchAt(shown.level) / pitch }
 }
 
 // MARK: Stations
@@ -261,7 +234,7 @@ function decodeIntegers(text) {
 const stepNames = new Map()
 function namesOf(index) {
   if (!stepNames.has(index)) {
-    stepNames.set(index, (transit.steps[index].labels ?? []).flatMap(([name, points, angles, sides]) => {
+    stepNames.set(index, (transit.names[index]?.labels ?? []).flatMap(([name, points, angles, sides]) => {
       const [text, colour] = transit.labelNames[name]
       const turns = decodeIntegers(angles), halves = sides ? decodeIntegers(sides) : []
       return decodePairs(points, 1e5).map(([lat, lon], i) => [text, colour, lon, lat, turns[i], (halves[i] ?? 0) / 2])
@@ -273,8 +246,10 @@ function showNames(z) {
   const wanted = new Map()
   const { center, span } = map.region
   const rotation = Math.round(map.rotation)
-  const linePitch = shown.half === undefined ? 0 : pitchAt(shown.half)
-  for (const [text, colour, lon, lat, angle, side] of namesOf(stepIndex(z))) {
+  const linePitch = pitchAt(shown.level)
+  // The names for the zoom: the last step starting at or before it, to the
+  // nearest whole zoom, if any
+  for (const [text, colour, lon, lat, angle, side] of namesOf(transit.names.findLastIndex((s) => s.zoom <= z + 0.5))) {
     if (Math.abs(lat - center.latitude) > span.latitudeDelta * 0.75 || Math.abs(lon - center.longitude) > span.longitudeDelta * 0.75) continue
     // Turned to read left to right, and moved onto its line
     let turn = angle - rotation, below = side * linePitch
@@ -304,7 +279,7 @@ function update(moving) {
   const lines = showLines(z, moving)
   if (!moving) { showNames(z); showStations(z) }
   // For debugging: the zoom, what's drawn and how much is on the map
-  status.textContent = `Zoom ${z.toFixed(1)} · ${shown.key} · ${lines} lines · ${shownNames.size} names · ${shownAnnotations.size} stations`
+  status.textContent = `Zoom ${z.toFixed(1)} · drawn for ${shown.level} · ${lines} lines · ${shownNames.size} names · ${shownAnnotations.size} stations`
 }
 
 // Follow the zoom while the map moves, not just when it stops
