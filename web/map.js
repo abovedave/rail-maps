@@ -85,14 +85,16 @@ const lineStyle = (colour, width) => new mapkit.Style({
 const stepIndex = (z) => Math.max(0, transit.steps.findLastIndex((s) => s.zoom <= z + 0.5))
 /** How much wider than drawn to show a step's lines at a zoom. The
  *  overview's widen and narrow as roads do, no thinner than half. Side by
- *  side, lines keep to two thirds of their spacing, which doubles each
- *  level in, from 0.2 to 3 points wide: in quarter levels, so overlays
- *  aren't restyled every frame. */
+ *  side, lines keep to two thirds of their spacing (as drawn, linePoints of
+ *  pitchPoints), which doubles each level in from the step's own, from 0.2
+ *  to 3 points wide: in quarter levels, so overlays aren't restyled every
+ *  frame. */
 function scaleAt(z, index) {
-  const { drawn, overview } = transit.steps[index]
+  const { drawn, overview, pitch = transit.pitchPoints } = transit.steps[index]
   if (overview) return Math.max(0.5, roadAt(z) / roadAt(drawn))
-  const scale = 2 ** (Math.round((z - drawn) * 4) / 4)
-  return Math.min(3, Math.max(0.2, transit.linePoints * scale)) / transit.linePoints
+  const spacing = pitch * 2 ** (Math.round((z - drawn) * 4) / 4)
+  const width = spacing * (transit.linePoints / transit.pitchPoints)
+  return Math.min(3, Math.max(0.2, width)) / transit.linePoints
 }
 
 /** Each step's line overlays, made when first shown. */
@@ -131,9 +133,10 @@ function showStepLines(z) {
  *  further apart than pitch points: for station dots to match. */
 const pitch = transit.pitchPoints
 function lineScale(z) {
-  const index = stepIndex(z), { drawn } = transit.steps[index]
-  // Lines' spacing is fixed on the ground, so it doubles each zoom level in
-  return { scale: scaleAt(z, index), spread: 2 ** (Math.round((z - drawn) * 10) / 10) }
+  const index = stepIndex(z), { drawn, pitch: drawnPitch = pitch } = transit.steps[index]
+  // Lines' spacing is fixed on the ground, so it doubles each zoom level in,
+  // from the step's own (some drawings have more space between lines)
+  return { scale: scaleAt(z, index), spread: (drawnPitch / pitch) * 2 ** (Math.round((z - drawn) * 10) / 10) }
 }
 
 // MARK: Stations

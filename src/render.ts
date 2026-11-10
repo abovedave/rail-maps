@@ -13,8 +13,8 @@
 // as a Google encoded polyline, and the station dots (see stationDots):
 // { linePoints, pitchPoints, darkColours: { colour: colour },
 // stations: [[name, lon, lat, angle, colour, …]], steps: [{ zoom, drawn: the
-// zoom it's drawn for, overview: true for the overview, lines: [[colour,
-// polyline]], labels: line names (see labels.ts), [[name, positions as a polyline, angles as encoded whole degrees
+// zoom it's drawn for, pitch: its lines' pitch if not pitchPoints, overview:
+// true for the overview, lines: [[colour, polyline]], labels: line names (see labels.ts), [[name, positions as a polyline, angles as encoded whole degrees
 // clockwise from east]] }], labelNames: [[text, colour]] (labels' `name`
 // indexes it), labelPoints: their text size }. A step is shown
 // from its zoom until the next step's (to the nearest whole zoom).
@@ -28,7 +28,7 @@ import { darkColours, stationDots } from './stations.ts'
 import type { LatLon } from './osm.ts'
 
 /** Lines' width, and the space between them, in screen points at the zoom
- *  they're drawn for. */
+ *  they're drawn for (the space for each drawing in SIDE_BY_SIDE). */
 const LINE_POINTS = 2
 const GAP_POINTS = 1
 /** The furthest out the map is drawn. */
@@ -37,9 +37,10 @@ const MIN_ZOOM = 5
  *  a drawing for every other zoom (SIDE_BY_SIDE), each shown from a level
  *  before it to half a level after. Spacing is fixed on the ground, so a
  *  drawing's lines are twice as far apart a level in, and half a level out
- *  of their own: maps widen and narrow lines with it, keeping them two
- *  thirds of the spacing, from 0.2 to 3 points (`overview` unset, see
- *  web/map.js).
+ *  of their own. Each drawing's spacing is double the one before's, so
+ *  where one drawing gives way to the next, spacing only halves, as it
+ *  would with a drawing for every zoom: maps keep lines two thirds of their
+ *  spacing wide, from 0.2 to 3 points (`overview` unset, see web/map.js).
  *  Further out, from MIN_ZOOM, the map is an overview instead: each line on
  *  its own track, over each other where they share it (see overview). Side
  *  by side there, lines crowd: drawn for their own zoom they'd be hundreds
@@ -47,14 +48,14 @@ const MIN_ZOOM = 5
  *  closer their colours blur. Nor is anything moved off its track, as tidy
  *  moves lines to draw them side by side. Maps widen and narrow its lines
  *  as Apple's roads do. */
-const SIDE_BY_SIDE = [14, 16, 18]
-/** Each step's first zoom, the zoom it's drawn for, and whether it's the
- *  overview. The overview is drawn twice: simply further out, and in more
+const SIDE_BY_SIDE = [{ drawn: 14, gap: GAP_POINTS }, { drawn: 16, gap: 4 }, { drawn: 18, gap: 10 }]
+/** Each step's first zoom, the zoom it's drawn for, the space between its
+ *  lines, and whether it's the overview. The overview is drawn twice: simply further out, and in more
  *  detail, with line names, from LABELS_ZOOM. */
 const STEPS = [
-  { zoom: MIN_ZOOM, drawn: 10, overview: true },
-  { zoom: 11, drawn: 12, overview: true },
-  ...SIDE_BY_SIDE.map((drawn) => ({ zoom: drawn - 1, drawn, overview: false })),
+  { zoom: MIN_ZOOM, drawn: 10, gap: GAP_POINTS, overview: true },
+  { zoom: 11, drawn: 12, gap: GAP_POINTS, overview: true },
+  ...SIDE_BY_SIDE.map(({ drawn, gap }) => ({ zoom: drawn - 1, drawn, gap, overview: false })),
 ]
 /** The overview's drawing order, last on top: National Rail at the bottom,
  *  then each network known by name, the first in LINES on top. */
@@ -143,16 +144,16 @@ function encodeLabels(labels: (string | number)[][]) {
 
 /** The overview's lines, for each step drawn as the overview. */
 const overviewPieces = overview()
-const steps: { zoom: number; drawn: number; overview?: true; lines: string[][]; labels: (string | number)[][] }[] = []
-for (const { zoom, drawn, overview: isOverview } of STEPS) {
+const steps: { zoom: number; drawn: number; pitch?: number; overview?: true; lines: string[][]; labels: (string | number)[][] }[] = []
+for (const { zoom, drawn, gap, overview: isOverview } of STEPS) {
   const metresPerPoint = METRES_AT_ZOOM_0 / 2 ** drawn
   const round = (v: number) => Math.round(v * 1e6) / 1e6
   const toLatLon = (points: [number, number][]) =>
     simplify(points, metresPerPoint / 4).map(([x, y]): LatLon => { const [lon, lat] = fromMercator(x, y); return [round(lat), round(lon)] })
-  const joined = join(isOverview ? overviewPieces : drawing(metresPerPoint), metresPerPoint / 2)
+  const joined = join(isOverview ? overviewPieces : drawing(metresPerPoint, gap), metresPerPoint / 2)
   const lines = joined.map(({ colour, points }) => [colour, encode(toLatLon(points))])
   const labels = zoom >= LABELS_ZOOM ? placeLabels(joined, metresPerPoint, stationPoints, nameAt, fromMercator) : []
-  steps.push({ zoom, drawn, ...(isOverview && { overview: true as const }), lines, labels: encodeLabels(labels) })
+  steps.push({ zoom, drawn, ...(gap !== GAP_POINTS && { pitch: LINE_POINTS + gap }), ...(isOverview && { overview: true as const }), lines, labels: encodeLabels(labels) })
   console.error(`zoom ${zoom}+ (drawn for ${drawn}): ${lines.length} lines, ${labels.length} names`)
 }
 
@@ -175,10 +176,10 @@ function overview() {
 
 /** The lines drawn side by side by transitmap at a scale, in Web Mercator
  *  metres. */
-function drawing(metresPerPoint: number) {
+function drawing(metresPerPoint: number, gap: number) {
   const svg = spawnSync('vendor/loom/build/transitmap', [
     '--line-width', String(LINE_POINTS * metresPerPoint),
-    '--line-spacing', String(GAP_POINTS * metresPerPoint),
+    '--line-spacing', String(gap * metresPerPoint),
     '--outline-width', '0', '--no-render-stations',
   ], { input: graph, maxBuffer: 1 << 30 }).stdout.toString()
 
