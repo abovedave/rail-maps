@@ -29,8 +29,12 @@ import { services, type Route } from './routes.ts'
 /** Junctions joined by a track shorter than this, in metres, become one. */
 const MIN_TRACK = 200
 /** A station's stops linked by track shorter than this, in metres,
- *  become one. */
+ *  become one; at a terminus, stops where lines end, up to
+ *  MAX_TERMINUS_LINK, out through its throat and back in (Liverpool
+ *  Street's Overground and National Rail platforms), so its lines run in
+ *  together and end side by side rather than peeling off one by one. */
 const MAX_STOP_LINK = 400
+const MAX_TERMINUS_LINK = 1500
 /** How far along a track, in metres, a junction's move eases out, so lines
  *  bend smoothly into where it's moved to. */
 const EASE = 300
@@ -190,17 +194,22 @@ function joinJunctions() {
 function joinStops() {
   const name = (n: string) => nodes.get(n)?.properties.station_label
   const lines = (n: string) => new Set(edgesAt.get(n)!.flatMap((x) => x.properties.lines.map((l: any) => l.id))).size
+  /** Where lines end: a stop with one track. */
+  const isTerminus = (n: string) => edgesAt.get(n)?.length === 1
   /** The track from a stop to the nearest other stop of its name, within
-   *  MAX_STOP_LINK, through junctions only. */
+   *  MAX_STOP_LINK (MAX_TERMINUS_LINK between termini), through junctions
+   *  only. */
   function link(start: string): { to: string; path: any[] } | undefined {
+    const limit = isTerminus(start) ? MAX_TERMINUS_LINK : MAX_STOP_LINK
     const distance = new Map([[start, 0]]), via = new Map<string, any>(), settled = new Set<string>()
     for (;;) {
       let at: string | undefined, best = Infinity
       for (const [n, d] of distance) if (!settled.has(n) && d < best) [at, best] = [n, d]
-      if (at === undefined || best >= MAX_STOP_LINK) return
+      if (at === undefined || best >= limit) return
       settled.add(at)
       if (at !== start && isStation(at)) {
         if (name(at) !== name(start)) continue
+        if (best >= MAX_STOP_LINK && !isTerminus(at)) continue
         const path: any[] = []
         for (let n = at; n !== start;) { const e = via.get(n); path.unshift(e); n = other(e, n) }
         return { to: at, path }
