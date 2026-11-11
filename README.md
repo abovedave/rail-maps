@@ -1,4 +1,7 @@
-# GB Transit Map
+ > [!NOTE]
+ > This is a work in progress, more ways to consume the data will be available soon.
+
+# Country scale transit maps
 
 ![Britain's transit map](rail-maps-og.png)
 
