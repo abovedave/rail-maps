@@ -1,5 +1,7 @@
 # GB Transit Map
 
+![Britain's transit map](rail-maps-og.png)
+
 A transit map of Britain's railways (currently England, Scotland and
 Wales), built from OpenStreetMap and drawn over Apple Maps: the National
 Rail network as one line, with a few networks people know by name (the
