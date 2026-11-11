@@ -1,10 +1,10 @@
-// Builds the rail track graph the app uses to draw a train's route along
-// real track.
+// Builds a rail track graph, for drawing a train's route along real track.
 //
-//   node map/tracks.ts <extract.osm.pbf> <stations.json> > tracks.json
+//   node map/tracks.ts <extract.osm.pbf> [stations.json] > tracks.json
 //
-// stations.json is the app's station list (`api/public/stations.json`
-// there: { stations: [{ crs, lat, lon }] }).
+// stations.json is the stations to snap to the track:
+// { stations: [{ crs, lat, lon }] }. Without it (as an argument or the
+// STATIONS_JSON environment variable), there's no track graph to build.
 //
 // Keeps running lines (railway=rail without a service tag, so no sidings or
 // yards, plus crossovers between parallel tracks; no heritage, military or
@@ -18,11 +18,16 @@ import { readFileSync } from 'node:fs'
 import { encode, metres, simplifyLatLon } from './lib/geo.ts'
 import { filtered, inNorthernIreland, type LatLon } from './lib/osm.ts'
 
-const [pbf, stationsPath] = process.argv.slice(2)
+const [pbf, stationsPath = process.env.STATIONS_JSON] = process.argv.slice(2)
 
-if (!pbf || !stationsPath) {
-  console.error('Usage: node map/tracks.ts <extract.osm.pbf> <stations.json>')
+if (!pbf) {
+  console.error('Usage: node map/tracks.ts <extract.osm.pbf> [stations.json]')
   process.exit(1)
+}
+
+if (!stationsPath) {
+  console.error('No stations.json given (or STATIONS_JSON set): skipping the track graph')
+  process.exit(0)
 }
 
 /** Max distance from a station's location to the track, in metres. */

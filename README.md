@@ -1,13 +1,14 @@
 # GB Transit Map
 
-A transit map of Britain's railways, built from OpenStreetMap and drawn over
-Apple Maps: the National Rail network as one line, with a few networks
-people know by name (the Elizabeth line, the Overground, Thameslink…) in
-their own colours, side by side where they share track.
+A transit map of Britain's railways (currently England, Scotland and
+Wales), built from OpenStreetMap and drawn over Apple Maps: the National
+Rail network as one line, with a few networks people know by name (the
+Elizabeth line, the Overground, Thameslink…) in their own colours, side by
+side where they share track.
 
-It builds one file, `out/gb.transit.json`, which a web preview (`web/`) and
-the app (`../the app`) both draw. the app copies it in itself:
-see "Map sources" in its README.
+It builds one file, `out/gb.transit.json`. A web preview (`web/`) draws it,
+but it's made to be drawn in an app with
+[SwiftUI's MapKit](https://developer.apple.com/documentation/mapkit).
 
 ## Quick start
 
@@ -70,7 +71,7 @@ ordered line graph    out/gb.map.json
   │  render.ts       the graph, line names and station dots, for maps
   ▼
 out/gb.transit.json
-  │  web/bundles.js  (and the app's TransitDrawing.swift)
+  │  web/bundles.js
   ▼
 lines drawn side by side on the map, at whatever zoom it's at
 ```
@@ -144,8 +145,9 @@ Writes `out/gb.transit.json`.
 
 #### Track graph: `npm run tracks`
 
-Separately, `map/tracks.ts` splits all running track at junctions and
-the app's stations, for the app to route trains along real track.
+Separately, `map/tracks.ts` splits all running track at junctions and the
+stations in `STATIONS_JSON` (set in `.env`), for routing trains along real
+track. Skipped if it isn't set.
 
 Writes `out/gb.tracks.json`.
 
@@ -210,13 +212,13 @@ the bypasses dropped.
 
 ### Drawing
 
-`web/bundles.js` (and `TransitDrawing.swift`, its port in the app) draws
-the lines from the ordered line graph for a zoom: each edge's lines are
-offset from its centreline, in loom's order; lines going on through a node
-are cut back from it and joined through it with a curve; and each colour's
-pieces are joined into as few lines as they'll go (about 500 for all of
-Britain). It takes about 30 ms, so maps redraw as they zoom: every half
-level from zoom 12, every whole level further out, from zoom 5 to 19.
+`web/bundles.js` draws the lines from the ordered line graph for a zoom:
+each edge's lines are offset from its centreline, in loom's order; lines
+going on through a node are cut back from it and joined through it with a
+curve; and each colour's pieces are joined into as few lines as they'll go
+(about 500 for all of Britain). It takes about 30 ms, so maps redraw as
+they zoom: every half level from zoom 12, every whole level further out,
+from zoom 5 to 19.
 
 Lines are 3.5 pt apart (centre to centre) at zoom 14, twice as far apart
 two levels in and half two levels out, but never closer than 3 pt, and
@@ -265,7 +267,7 @@ vendor/              LOOM and the OSM extract (not in git)
 | How close tracks merge | `map/topo.ts` | `npm run topo`, `tidy`, `check`, `render` |
 | Tidying | `map/tidy.ts` | `npm run tidy`, `check`, `render` |
 | Line width, spacing, line names' zooms | `map/render.ts` | `npm run render` |
-| How lines are drawn | `web/bundles.js`, and the same in the app's `TransitDrawing.swift` | reload the page |
+| How lines are drawn | `web/bundles.js`, and any app's port of it | reload the page |
 
 `npm run typecheck` checks the build's types. Code separates each step in a
 function with a blank line.

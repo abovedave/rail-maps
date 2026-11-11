@@ -14,7 +14,7 @@
     "tidy": "node map/tidy.ts out/gb.topo.json out/gb.stations.json out/gb.routes.json out/gb.linegraph.json | vendor/loom/build/loom > out/gb.map.json",
     "check": "node map/check.ts out/gb.routes.json out/gb.linegraph.json out/gb.stations.json out/gb.map.json",
     "render": "node map/render.ts",
-    "tracks": "node map/tracks.ts vendor/osm/great-britain-latest.osm.pbf ../app/api/public/stations.json > out/gb.tracks.json",
+    "tracks": "node --env-file-if-exists=.env map/tracks.ts vendor/osm/great-britain-latest.osm.pbf > out/gb.tracks.json",
     "web": "node --env-file=.env web/serve.ts",
     "typecheck": "tsc"
   },

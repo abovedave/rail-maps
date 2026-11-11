@@ -1,5 +1,5 @@
 // Shows Britain's transit map on Apple Maps with MapKit JS, from
-// out/gb.transit.json (see map/render.ts), the same way the app does.
+// out/gb.transit.json (see map/render.ts).
 //
 // Lines sharing track are drawn side by side here (bundles.js), from the
 // line graph, for the map's zoom. Stations are a dot on each line calling
